@@ -1,0 +1,33 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          46.6753,
+          24.7136
+        ]
+      },
+      "properties": {
+        "sensor_id": "S001",
+        "installed_since": "2024-06-01"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          46.8,
+          24.9
+        ]
+      },
+      "properties": {
+        "sensor_id": "S002",
+        "installed_since": "2024-08-15"
+      }
+    }
+  ]
+}
