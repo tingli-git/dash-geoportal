@@ -19,3 +19,6 @@ dependencies = [
     "solara==1.54.0",
     "xarray>=2025.10.1",
 ]
+
+[tool.setuptools]
+packages = ["functions"]  # <-- only ship the code package

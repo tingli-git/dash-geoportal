@@ -2,46 +2,68 @@
 from __future__ import annotations
 import math
 from pathlib import Path
+from typing import Optional, Tuple, List
+
 import solara
 import ipyleaflet
+import ipywidgets as W
+
+from starlette.responses import PlainTextResponse
+from solara.server.fastapi import app as solara_app
 
 from functions.geoportal.v3.config import CFG
 from functions.geoportal.v3.state import ReactiveRefs
 from functions.geoportal.v3.basemap import (
-    create_base_map, osm_layer, esri_world_imagery_layer, ensure_controls, ensure_base_layers
+    create_base_map, osm_layer, esri_world_imagery_layer,
+    ensure_controls, ensure_base_layers,
 )
 from functions.geoportal.v3.layers import (
     remove_prior_groups, add_group_and_fit,
-    upsert_overlay_by_name, set_layer_visibility, set_layer_opacity
+    upsert_overlay_by_name, set_layer_visibility, set_layer_opacity,
 )
 from functions.geoportal.v3.widgets import use_debounce, GeoJSONDrop
 from functions.geoportal.v3.errors import Toast, use_toast
 from functions.geoportal.v3.geojson_loader import load_icon_group_from_geojson
 from functions.geoportal.v3.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
-import ipywidgets as W
-
-from starlette.staticfiles import StaticFiles
-from solara.server.app import app as starlette_app
-
-# The actual pyramid folder (your XYZ root)
-PYRAMID_DIR = Path(CFG.default_tiles_dir).resolve()
-assert PYRAMID_DIR.exists(), f"Tiles dir not found: {PYRAMID_DIR}"
-
-# Mount this exact folder as `/tiles`
-MOUNT_POINT = "/tiles"
-starlette_app.mount(MOUNT_POINT, StaticFiles(directory=str(PYRAMID_DIR), html=False), name="tiles")
 
 
+# -------------------------
+# small API (health check)
+# -------------------------
+API_PREFIX = "/api"
 
-# ---------- helpers to inspect a local XYZ tile pyramid ----------
-def _detect_zoom_range(tiles_folder: Path):
-    z_levels = sorted(int(p.name) for p in tiles_folder.iterdir() if p.is_dir() and p.name.isdigit())
-    if not z_levels:
+@solara_app.get(f"{API_PREFIX}/ping")
+def ping():
+    return PlainTextResponse("pong")
+
+
+# -------------------------
+# External tiles server base (manual)
+# -------------------------
+# Set CFG.tiles_http_base in your config.py, e.g. "http://127.0.0.1:8766"
+TILES_HTTP_BASE: str = getattr(CFG, "tiles_http_base", "http://127.0.0.1:8766")
+
+
+# -------------------------
+# filesystem tile introspection (for UI & fitBounds)
+# -------------------------
+def _detect_zoom_range(tiles_folder: Path) -> Tuple[Optional[int], Optional[int]]:
+    try:
+        z_levels = sorted(int(p.name) for p in tiles_folder.iterdir() if p.is_dir() and p.name.isdigit())
+    except FileNotFoundError:
         return None, None
-    return z_levels[0], z_levels[-1]
+    return (z_levels[0], z_levels[-1]) if z_levels else (None, None)
 
-def _tiles_xyz_bounds(tiles_folder: Path, z: int):
-    """Return Leaflet bounds [[south, west], [north, east]] by scanning x/y at zoom z."""
+def _detect_extension(tiles_folder: Path) -> Optional[str]:
+    for zdir in sorted((p for p in tiles_folder.iterdir() if p.is_dir() and p.name.isdigit()), key=lambda p: int(p.name)):
+        for xdir in sorted((p for p in zdir.iterdir() if p.is_dir() and p.name.isdigit()), key=lambda p: int(p.name)):
+            if list(xdir.glob("*.png")) or list(xdir.glob("*.PNG")):
+                return "png"
+            if list(xdir.glob("*.jpg")) or list(xdir.glob("*.JPG")) or list(xdir.glob("*.jpeg")) or list(xdir.glob("*.JPEG")):
+                return "jpg"
+    return None
+
+def _leaflet_bounds_from_xyz(tiles_folder: Path, z: int) -> Optional[List[List[float]]]:
     zdir = tiles_folder / str(z)
     if not zdir.exists():
         return None
@@ -49,23 +71,20 @@ def _tiles_xyz_bounds(tiles_folder: Path, z: int):
     if not xs:
         return None
     x_min, x_max = xs[0], xs[-1]
-
-    ys = []
+    ys: List[int] = []
     for x in (x_min, x_max):
         xdir = zdir / str(x)
-        ys_x = [int(p.stem) for p in xdir.glob("*.png")]
-        if ys_x:
-            ys.extend(ys_x)
+        for pat in ("*.png", "*.PNG", "*.jpg", "*.JPG", "*.jpeg", "*.JPEG"):
+            ys += [int(p.stem) for p in xdir.glob(pat)]
     if not ys:
-        ys = [int(p.stem) for p in (zdir / str(x_min)).glob("*.png")]
-        if not ys:
-            return None
+        return None
     y_min, y_max = min(ys), max(ys)
 
-    def num2lat(y, z):
+    def num2lat(y: int, z: int) -> float:
         n = math.pi - 2.0 * math.pi * y / (2 ** z)
         return math.degrees(math.atan(math.sinh(n)))
-    def num2lon(x, z):
+
+    def num2lon(x: int, z: int) -> float:
         return x / (2 ** z) * 360.0 - 180.0
 
     west  = num2lon(x_min, z)
@@ -74,120 +93,156 @@ def _tiles_xyz_bounds(tiles_folder: Path, z: int):
     south = num2lat(y_max + 1, z)
     return [[south, west], [north, east]]
 
-def _sample_tile_path(tiles_folder: Path):
-    for zdir in sorted([p for p in tiles_folder.iterdir() if p.is_dir() and p.name.isdigit()]):
-        xs = sorted([p for p in zdir.iterdir() if p.is_dir() and p.name.isdigit()])
-        if not xs:
-            continue
-        for xdir in (xs[0], xs[-1]):
-            ys = sorted(list(xdir.glob("*.png")))
-            if ys:
-                return ys[0]
-    return None
+
+# -------------------------
+# Legend: small renderer for the card (outside the map)
+# -------------------------
+def _legend_inline_row():
+    enabled = getattr(CFG, "raster_legend_enabled", True)
+    if not enabled:
+        return solara.Div()
+
+    items = getattr(CFG, "raster_legend", [])
+    title = getattr(CFG, "raster_legend_title", "")
+
+    row_children = []
+
+    # title (small inline)
+    if title:
+        row_children.append(
+            solara.Markdown(f"**{title}:**", style={"marginRight": "8px", "whiteSpace": "nowrap"})
+        )
+
+    for it in items:
+        color_box = solara.Div(
+            style={
+                "width": "14px",
+                "height": "14px",
+                "background": it["color"],
+                "border": "1px solid #666",
+                "borderRadius": "3px",
+                "marginRight": "4px",
+            }
+        )
+        label = solara.Markdown(
+            f"{it['name']}",
+            style={"marginRight": "12px", "whiteSpace": "nowrap"}
+        )
+        row_children.extend([color_box, label])
+
+    return solara.Row(
+        children=row_children,
+        gap="4px",
+        style={"alignItems": "center"}
+    )
 
 
+
+# -------------------------
+# Main Solara page
+# -------------------------
 @solara.component
 def Page():
     show_toast, hide_toast, toast_state = use_toast()
 
-    # ---------- UI STATE ----------
+    # UI state
     geojson_path, set_geojson_path = solara.use_state(str(CFG.default_geojson))
-    debounced_path = use_debounce(geojson_path, delay_ms=500)
+    debounced_geojson = use_debounce(geojson_path, delay_ms=500)
     refs = ReactiveRefs()
 
     ts_title, set_ts_title = solara.use_state("")
     ts_df, set_ts_df = solara.use_state(None)
 
-    # Tiles folder default (your real path as fallback if CFG doesn't define it)
-    fallback_tiles = "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/tile_rasters/38RLQ_2024"
-    default_tiles_dir = str(getattr(CFG, "default_tiles_dir", fallback_tiles))
-    default_raster_name = str(getattr(CFG, "raster_layer_name", "Tree-Vege-Nonveg classification"))
-    default_raster_opacity = float(getattr(CFG, "raster_opacity_default", 0.75))
-
+    default_tiles_dir = str(getattr(
+        CFG, "default_tiles_dir",
+        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/tile_rasters/38RLQ_2024"
+    ))
     raster_dir, set_raster_dir = solara.use_state(default_tiles_dir)
-    raster_visible, set_raster_visible = solara.use_state(True)
-    raster_opacity, set_raster_opacity = solara.use_state(default_raster_opacity)
-    raster_tms, set_raster_tms = solara.use_state(False)  # you used --xyz ⇒ keep False
-    debounced_raster_dir = use_debounce(raster_dir, delay_ms=400)
+    debounced_raster_dir = use_debounce(raster_dir, delay_ms=350)
 
-    # ---------- MAP & BASE LAYERS ----------
+    raster_visible, set_raster_visible = solara.use_state(True)
+    raster_opacity, set_raster_opacity = solara.use_state(float(getattr(CFG, "raster_opacity_default", 0.75)))
+
+    # Derived
+    tile_ext, set_tile_ext = solara.use_state("png")
+    zmin, set_zmin = solara.use_state(None)
+    zmax, set_zmax = solara.use_state(None)
+    tile_bounds, set_tile_bounds = solara.use_state(None)
+
+    # Map & base layers
     m = solara.use_memo(lambda: create_base_map(CFG.map_center, CFG.map_zoom, CFG.map_width, CFG.map_height), [])
     osm = solara.use_memo(osm_layer, [])
     esri = solara.use_memo(esri_world_imagery_layer, [])
     solara.use_effect(lambda: (ensure_base_layers(m, osm, esri), ensure_controls(m)), [])
 
-    # ---------- RASTER OVERLAY ----------
-    def _make_raster_layer():
-        folder = Path(debounced_raster_dir)
+    # React to tiles folder changes (used for ext, bounds, fit)
+    def _on_tiles_folder_change():
+        folder = Path(debounced_raster_dir).resolve()
         if not folder.exists():
-            return None, None, None, None, f"Tiles folder not found: {folder}"
+            show_toast(f"Tiles folder not found: {folder}", "warning")
+            return
 
-        zmin, zmax = _detect_zoom_range(folder)
-        if zmin is None:
-            return None, None, None, None, f"No zoom levels found in: {folder}"
+        ext = _detect_extension(folder) or "png"
+        _zmin, _zmax = _detect_zoom_range(folder)
+        bounds = _leaflet_bounds_from_xyz(folder, _zmax) if _zmax is not None else None
 
-        # compute bounds (Leaflet expects [ [south, west], [north, east] ])
-        bounds_latlon = _tiles_xyz_bounds(folder, zmax)
-        sample = _sample_tile_path(folder)
-        if sample is None or not sample.exists():
-            return None, zmin, zmax, bounds_latlon, f"No PNG tiles found under: {folder}"
+        set_tile_ext(ext)
+        set_zmin(_zmin)
+        set_zmax(_zmax)
+        set_tile_bounds(bounds)
 
-        try:
-            layer = ipyleaflet.TileLayer(
-            url=f"{MOUNT_POINT}/{{z}}/{{x}}/{{y}}.png",
-            name=default_raster_name,
+        if bounds:
+            try:
+                m.fit_bounds(bounds, max_zoom=_zmax or getattr(CFG, "fit_bounds_max_zoom", 14))
+            except TypeError:
+                m.fit_bounds(bounds)
+        if _zmin is not None and m.zoom < _zmin:
+            m.zoom = _zmin
+
+        show_toast(f"Tiles ready z∈[{_zmin},{_zmax}] • ext=.{ext}", "success")
+
+    solara.use_effect(_on_tiles_folder_change, [debounced_raster_dir])
+
+    # Raster overlay (single upsert)
+    def _build_raster_layer():
+        cache_buster = abs(hash(debounced_raster_dir)) % (10**8)
+        layer = ipyleaflet.TileLayer(
+            url=f"{TILES_HTTP_BASE}/{{z}}/{{x}}/{{y}}.{tile_ext}?v={cache_buster}",
+            name=str(getattr(CFG, "raster_layer_name", "Raster")),
             opacity=float(raster_opacity),
-            min_zoom=zmin,
-            max_zoom=zmax,
+            min_zoom=0 if zmin is None else min(0, zmin),
+            max_zoom=22 if zmax is None else max(22, zmax),
             no_wrap=True,
             tile_size=256,
-            tms=bool(raster_tms),   # keep False for XYZ; True only if your Y is flipped (TMS)
-            attribution="© your data",
-            )
-            try:
-                layer.z_index = 400
-            except Exception:
-                pass
+            tms=False,  # TMS (flip Y) removed; using XYZ only
+            attribution="© local tiles",
+        )
+        try:
+            layer.z_index = 400
+        except Exception:
+            pass
+        return layer
 
-            show_toast(f"Tiles ready z∈[{zmin},{zmax}] • sample: {sample}", "success")
-            return layer, zmin, zmax, bounds_latlon, None
-        except Exception as e:
-            return None, zmin, zmax, bounds_latlon, f"Failed to create raster layer: {e}"
-
-
-    raster_layer, zmin, zmax, tile_bounds, raster_err = solara.use_memo(
-        _make_raster_layer, [debounced_raster_dir, raster_tms]
+    raster_layer = solara.use_memo(
+        _build_raster_layer,
+        [debounced_raster_dir, tile_ext, raster_opacity, zmin, zmax]
     )
 
-    # Attach/replace below markers
-    solara.use_effect(lambda: (raster_layer and upsert_overlay_by_name(m, raster_layer, below_markers=True)),
-                      [m, raster_layer])
+    def _attach_layer():
+        if raster_layer is None:
+            return
+        upsert_overlay_by_name(m, raster_layer, below_markers=True)
+        m.layers = list(m.layers)
 
-    # Visibility & opacity reactive
+    solara.use_effect(_attach_layer, [m, raster_layer])
+
+    # Visibility & opacity
     solara.use_effect(lambda: (raster_layer and set_layer_visibility(m, raster_layer, raster_visible)),
                       [m, raster_layer, raster_visible])
     solara.use_effect(lambda: (raster_layer and set_layer_opacity(raster_layer, raster_opacity)),
                       [raster_layer, raster_opacity])
 
-    # Errors / warnings
-    solara.use_effect(lambda: show_toast(raster_err, "warning") if raster_err else None, [raster_err])
-
-    # Auto-fit to tile bounds once; warn if zoomed out below zmin
-    def _fit_and_warn():
-        if not raster_layer:
-            return
-        if tile_bounds:
-            try:
-                m.fit_bounds(tile_bounds, max_zoom=zmax or CFG.fit_bounds_max_zoom)
-            except TypeError:
-                m.fit_bounds(tile_bounds)
-            if zmin is not None and m.zoom < zmin:
-                m.zoom = zmin
-        if zmin is not None and m.zoom < zmin:
-            show_toast(f"Zoom in to at least z={zmin} to see tiles.", "info")
-    solara.use_effect(_fit_and_warn, [raster_layer, tile_bounds, m.zoom, zmin, zmax])
-
-    # ---------- MARKERS / POPUPS ----------
+    # Markers / popups
     def on_show_timeseries(props: dict):
         try:
             csv_path = resolve_csv_path(props)
@@ -203,24 +258,39 @@ def Page():
 
     def _build_group():
         try:
-            group, bounds = load_icon_group_from_geojson(Path(debounced_path), m, refs.active_marker_ref, on_show_timeseries)
+            group, bounds = load_icon_group_from_geojson(Path(debounced_geojson), m, refs.active_marker_ref, on_show_timeseries)
             return group, bounds, None
         except Exception as e:
             return None, None, str(e)
 
-    icon_group, bounds, load_err = solara.use_memo(_build_group, [debounced_path])
-    solara.use_effect(lambda: setattr(refs.did_fit_ref, "current", False), [debounced_path])
+    icon_group, bounds, load_err = solara.use_memo(_build_group, [debounced_geojson])
     solara.use_effect(lambda: show_toast(load_err, "error") if load_err else None, [load_err])
 
     def _sync_markers():
         if not icon_group:
             return
         remove_prior_groups(m, keep=icon_group, names_to_prune={CFG.layer_group_name, "Sensor markers", ""})
-        add_group_and_fit(m, icon_group, bounds, refs.did_fit_ref,
-                          max_zoom=CFG.fit_bounds_max_zoom, padding=CFG.fit_bounds_padding)
-    solara.use_effect(_sync_markers, [icon_group, bounds])
+        add_group_and_fit(
+            m, icon_group, bounds, refs.did_fit_ref,
+            max_zoom=getattr(CFG, "fit_bounds_max_zoom", 14),
+            padding=getattr(CFG, "fit_bounds_padding", (20, 20))
+        )
+        # keep sensors on top
+        try:
+            if hasattr(icon_group, "z_index"):
+                icon_group.z_index = 10_000
+        except Exception:
+            pass
+        layers = [ly for ly in m.layers if ly is not icon_group]
+        layers.append(icon_group)
+        m.layers = layers
 
-    # ---------- UI ----------
+    # keep sensors on top after any raster change
+    solara.use_effect(_sync_markers, [icon_group, bounds, raster_layer, raster_visible, raster_opacity])
+
+    # -------------------------
+    # UI
+    # -------------------------
     with solara.Column(gap="0.75rem"):
         solara.Markdown("### 🌴 Geoportal for Date Palm Field Informatics")
 
@@ -229,23 +299,25 @@ def Page():
             solara.InputText(label="GeoJSON path:", value=geojson_path, on_value=set_geojson_path, continuous_update=True)
         GeoJSONDrop(on_saved_path=set_geojson_path, label="...or drag & drop a .geojson to use it")
 
-        # Raster overlay controls
-        with solara.Card("Raster overlay (XYZ)"):
-            with solara.Row(gap="0.75rem", style={"align-items": "center"}):
-                solara.InputText(
-                    label="Tiles folder (…/z/x/y.png)",
-                    value=raster_dir, on_value=set_raster_dir, continuous_update=True,
-                    style={"minWidth": "520px"}
-                )
+        # Raster overlay controls + Legend (outside the map)
+        with solara.Card("Tree-Vege-Bare Classification", style={"padding": "10px"}):
+            with solara.Row(gap="0.75rem", style={"alignItems": "center", "flexWrap": "wrap"}):
+                #solara.InputText(
+                #    label="Tiles folder (…/z/x/y.{png|jpg})",
+                #    value=raster_dir, on_value=set_raster_dir, continuous_update=True,
+                #    style={"minWidth": "520px"}
+                #)
                 solara.Switch(label="Visible", value=raster_visible, on_value=set_raster_visible)
-                solara.Switch(label="TMS (flip Y)", value=raster_tms, on_value=set_raster_tms)
-                with solara.Div(style={"width": "240px"}):
+                with solara.Div(style={"width": "220px"}):
                     solara.SliderFloat(
                         label="Opacity",
                         value=raster_opacity,
                         min=0.0, max=1.0, step=0.01,
                         on_value=set_raster_opacity,
                     )
+
+                # 👉 INLINE LEGEND
+                _legend_inline_row()
 
         # Map
         solara.display(m)
