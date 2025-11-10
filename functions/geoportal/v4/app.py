@@ -9,44 +9,37 @@ import ipyleaflet
 import ipywidgets as W
 
 from starlette.responses import PlainTextResponse
+from starlette.staticfiles import StaticFiles
 from solara.server.fastapi import app as solara_app
 
-from functions.geoportal.v3.config import CFG
-from functions.geoportal.v3.state import ReactiveRefs
-from functions.geoportal.v3.basemap import (
+from functions.geoportal.v4.config import CFG
+from functions.geoportal.v4.state import ReactiveRefs
+from functions.geoportal.v4.basemap import (
     create_base_map, osm_layer, esri_world_imagery_layer,
     ensure_controls, ensure_base_layers,
 )
-from functions.geoportal.v3.layers import (
+from functions.geoportal.v4.layers import (
     remove_prior_groups, add_group_and_fit,
     upsert_overlay_by_name, set_layer_visibility, set_layer_opacity,
+    attach_cpf_lazy,   # <-- lazy CPF attacher (URL-first, data fallback)
 )
-from functions.geoportal.v3.widgets import use_debounce, GeoJSONDrop
-from functions.geoportal.v3.errors import Toast, use_toast
-from functions.geoportal.v3.geojson_loader import load_icon_group_from_geojson
-from functions.geoportal.v3.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
+from functions.geoportal.v4.widgets import use_debounce, GeoJSONDrop
+from functions.geoportal.v4.errors import Toast, use_toast
+from functions.geoportal.v4.geojson_loader import load_icon_group_from_geojson
+from functions.geoportal.v4.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
 
+# Optional: serve /cpf/* from this app too (ok to keep)
+CPF_ROUTE = "/cpf"
+solara_app.mount(CPF_ROUTE, StaticFiles(directory=str(CFG.cpf_geojson_dir)), name="cpf")
 
-# -------------------------
-# small API (health check)
-# -------------------------
 API_PREFIX = "/api"
-
 @solara_app.get(f"{API_PREFIX}/ping")
 def ping():
     return PlainTextResponse("pong")
 
-
-# -------------------------
-# External tiles server base (manual)
-# -------------------------
-# Set CFG.tiles_http_base in your config.py, e.g. "http://127.0.0.1:8766"
 TILES_HTTP_BASE: str = getattr(CFG, "tiles_http_base", "http://127.0.0.1:8766")
 
 
-# -------------------------
-# filesystem tile introspection (for UI & fitBounds)
-# -------------------------
 def _detect_zoom_range(tiles_folder: Path) -> Tuple[Optional[int], Optional[int]]:
     try:
         z_levels = sorted(int(p.name) for p in tiles_folder.iterdir() if p.is_dir() and p.name.isdigit())
@@ -94,25 +87,17 @@ def _leaflet_bounds_from_xyz(tiles_folder: Path, z: int) -> Optional[List[List[f
     return [[south, west], [north, east]]
 
 
-# -------------------------
-# Legend: small renderer for the card (outside the map)
-# -------------------------
 def _legend_inline_row():
     enabled = getattr(CFG, "raster_legend_enabled", True)
     if not enabled:
         return solara.Div()
-
     items = getattr(CFG, "raster_legend", [])
     title = getattr(CFG, "raster_legend_title", "")
-
     row_children = []
-
-    # title (small inline)
     if title:
         row_children.append(
             solara.Markdown(f"**{title}:**", style={"marginRight": "8px", "whiteSpace": "nowrap"})
         )
-
     for it in items:
         color_box = solara.Div(
             style={
@@ -124,18 +109,9 @@ def _legend_inline_row():
                 "marginRight": "4px",
             }
         )
-        label = solara.Markdown(
-            f"{it['name']}",
-            style={"marginRight": "12px", "whiteSpace": "nowrap"}
-        )
+        label = solara.Markdown(f"{it['name']}", style={"marginRight": "12px", "whiteSpace": "nowrap"})
         row_children.extend([color_box, label])
-
-    return solara.Row(
-        children=row_children,
-        gap="4px",
-        style={"alignItems": "center"}
-    )
-
+    return solara.Row(children=row_children, gap="4px", style={"alignItems": "center"})
 
 
 # -------------------------
@@ -160,8 +136,13 @@ def Page():
     raster_dir, set_raster_dir = solara.use_state(default_tiles_dir)
     debounced_raster_dir = use_debounce(raster_dir, delay_ms=350)
 
-    raster_visible, set_raster_visible = solara.use_state(True)
+    # Raster overlay: OFF by default
+    raster_visible, set_raster_visible = solara.use_state(False)
     raster_opacity, set_raster_opacity = solara.use_state(float(getattr(CFG, "raster_opacity_default", 0.75)))
+
+    # NEW: CPF visibility/opacity state
+    cpf_visible, set_cpf_visible = solara.use_state(True)
+    cpf_opacity, set_cpf_opacity = solara.use_state( float(getattr(CFG, "cpf_style", {}).get("fillOpacity", 0.75)) )
 
     # Derived
     tile_ext, set_tile_ext = solara.use_state("png")
@@ -175,22 +156,16 @@ def Page():
     esri = solara.use_memo(esri_world_imagery_layer, [])
     solara.use_effect(lambda: (ensure_base_layers(m, osm, esri), ensure_controls(m)), [])
 
-    # React to tiles folder changes (used for ext, bounds, fit)
+    # Only scan tiles when overlay is visible
     def _on_tiles_folder_change():
         folder = Path(debounced_raster_dir).resolve()
         if not folder.exists():
             show_toast(f"Tiles folder not found: {folder}", "warning")
             return
-
         ext = _detect_extension(folder) or "png"
         _zmin, _zmax = _detect_zoom_range(folder)
         bounds = _leaflet_bounds_from_xyz(folder, _zmax) if _zmax is not None else None
-
-        set_tile_ext(ext)
-        set_zmin(_zmin)
-        set_zmax(_zmax)
-        set_tile_bounds(bounds)
-
+        set_tile_ext(ext); set_zmin(_zmin); set_zmax(_zmax); set_tile_bounds(bounds)
         if bounds:
             try:
                 m.fit_bounds(bounds, max_zoom=_zmax or getattr(CFG, "fit_bounds_max_zoom", 14))
@@ -198,10 +173,10 @@ def Page():
                 m.fit_bounds(bounds)
         if _zmin is not None and m.zoom < _zmin:
             m.zoom = _zmin
-
         show_toast(f"Tiles ready z∈[{_zmin},{_zmax}] • ext=.{ext}", "success")
 
-    solara.use_effect(_on_tiles_folder_change, [debounced_raster_dir])
+    solara.use_effect(lambda: (_on_tiles_folder_change() if raster_visible else None),
+                      [debounced_raster_dir, raster_visible])
 
     # Raster overlay (single upsert)
     def _build_raster_layer():
@@ -214,7 +189,7 @@ def Page():
             max_zoom=22 if zmax is None else max(22, zmax),
             no_wrap=True,
             tile_size=256,
-            tms=False,  # TMS (flip Y) removed; using XYZ only
+            tms=False,
             attribution="© local tiles",
         )
         try:
@@ -223,10 +198,8 @@ def Page():
             pass
         return layer
 
-    raster_layer = solara.use_memo(
-        _build_raster_layer,
-        [debounced_raster_dir, tile_ext, raster_opacity, zmin, zmax]
-    )
+    raster_layer = solara.use_memo(_build_raster_layer,
+                                   [debounced_raster_dir, tile_ext, raster_opacity, zmin, zmax])
 
     def _attach_layer():
         if raster_layer is None:
@@ -236,7 +209,7 @@ def Page():
 
     solara.use_effect(_attach_layer, [m, raster_layer])
 
-    # Visibility & opacity
+    # Visibility & opacity for raster
     solara.use_effect(lambda: (raster_layer and set_layer_visibility(m, raster_layer, raster_visible)),
                       [m, raster_layer, raster_visible])
     solara.use_effect(lambda: (raster_layer and set_layer_opacity(raster_layer, raster_opacity)),
@@ -275,7 +248,6 @@ def Page():
             max_zoom=getattr(CFG, "fit_bounds_max_zoom", 14),
             padding=getattr(CFG, "fit_bounds_padding", (20, 20))
         )
-        # keep sensors on top
         try:
             if hasattr(icon_group, "z_index"):
                 icon_group.z_index = 10_000
@@ -285,8 +257,54 @@ def Page():
         layers.append(icon_group)
         m.layers = layers
 
-    # keep sensors on top after any raster change
     solara.use_effect(_sync_markers, [icon_group, bounds, raster_layer, raster_visible, raster_opacity])
+
+    # === Center-Pivot yearly polygons (LAZY) ===
+    # Build once; returns (slider, button, refs) where refs["layer"] auto-updates when swapping layers.
+    cpf_slider, cpf_btn, cpf_refs = solara.use_memo(lambda: attach_cpf_lazy(m, auto_load_initial=True), [m])
+
+
+    # EFFECT: toggle CPF visibility (add/remove layer). If user turns it ON
+    # and nothing loaded yet, auto-click "Load year" once.
+    def _ensure_cpf_loaded_and_visibility():
+        lyr = cpf_refs["layer"]
+        loaded = cpf_refs["loaded_year"]()
+        if cpf_visible:
+            if loaded is None:
+                # auto-load once on first visibility toggle
+                try:
+                    cpf_btn.click()
+                except Exception:
+                    pass
+            else:
+                # ensure layer is on the map
+                if lyr not in m.layers:
+                    # insert above base, below markers
+                    try:
+                        base_count = sum(1 for L in m.layers if isinstance(L, (ipyleaflet.TileLayer, ipyleaflet.LocalTileLayer)) and getattr(L, "base", False))
+                    except Exception:
+                        base_count = 0
+                    m.layers = tuple(list(m.layers[:base_count]) + [lyr] + list(m.layers[base_count:]))
+        else:
+            # hide if present
+            if lyr in m.layers:
+                m.remove_layer(lyr)
+
+    solara.use_effect(_ensure_cpf_loaded_and_visibility, [cpf_visible, cpf_refs, m])
+
+    # EFFECT: update CPF opacity (fillOpacity + stroke opacity)
+    def _update_cpf_opacity():
+        lyr = cpf_refs["layer"]
+        if lyr in m.layers:
+            try:
+                st = dict(getattr(CFG, "cpf_style", {}))
+                st["fillOpacity"] = float(cpf_opacity)
+                # keep stroke visible but proportional
+                st["opacity"] = min(1.0, max(0.0, float(cpf_opacity) + 0.3))
+                lyr.style = st
+            except Exception:
+                pass
+    solara.use_effect(_update_cpf_opacity, [cpf_opacity, cpf_refs, m])
 
     # -------------------------
     # UI
@@ -294,33 +312,27 @@ def Page():
     with solara.Column(gap="0.75rem"):
         solara.Markdown("### 🌴 Geoportal for Date Palm Field Informatics")
 
-        # GeoJSON controls
-        #with solara.Row(gap="0.75rem", style={"align-items": "flex-end"}):
-            #solara.InputText(label="GeoJSON path:", value=geojson_path, on_value=set_geojson_path, continuous_update=True)
-        #GeoJSONDrop(on_saved_path=set_geojson_path, label="...or drag & drop a .geojson to use it")
-
         # Raster overlay controls + Legend (outside the map)
         with solara.Card("Tree-Vege-Bare Classification", style={"padding": "10px"}):
             with solara.Row(gap="0.75rem", style={"alignItems": "center", "flexWrap": "wrap"}):
-                #solara.InputText(
-                #    label="Tiles folder (…/z/x/y.{png|jpg})",
-                #    value=raster_dir, on_value=set_raster_dir, continuous_update=True,
-                #    style={"minWidth": "520px"}
-                #)
                 solara.Switch(label="Visible", value=raster_visible, on_value=set_raster_visible)
                 with solara.Div(style={"width": "220px"}):
-                    solara.SliderFloat(
-                        label="Opacity",
-                        value=raster_opacity,
-                        min=0.0, max=1.0, step=0.01,
-                        on_value=set_raster_opacity,
-                    )
-
-                # 👉 INLINE LEGEND
+                    solara.SliderFloat(label="Opacity", value=raster_opacity, min=0.0, max=1.0, step=0.01, on_value=set_raster_opacity)
                 _legend_inline_row()
-
+        # === Center-Pivot yearly polygons (lazy URL/data) ===
+        with solara.Card("Center-Pivot Fields (Yearly)", style={"padding": "10px", "marginTop": "8px"}):
+            with solara.Row(gap="0.75rem", style={"alignItems": "center", "flexWrap": "wrap"}):
+                solara.Switch(label="Visible", value=cpf_visible, on_value=set_cpf_visible)
+                with solara.Div(style={"width": "220px"}):
+                    solara.SliderFloat(label="Opacity", value=cpf_opacity, min=0.0, max=1.0, step=0.01, on_value=set_cpf_opacity)
+                # Year controls
+                solara.display(cpf_slider)
+                solara.display(cpf_btn)
+                solara.display(cpf_refs["status"])  # shows mode + filename or errors
         # Map
         solara.display(m)
+
+        
 
         # Optional timeseries panel
         if ts_df is not None:
