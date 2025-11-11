@@ -1,4 +1,4 @@
-# functions/geoportal/v3/app.py
+# functions/geoportal/v5/app.py
 from __future__ import annotations
 import math
 from pathlib import Path
@@ -11,20 +11,21 @@ import ipywidgets as W
 from starlette.responses import PlainTextResponse
 from solara.server.fastapi import app as solara_app
 
-from functions.geoportal.v3.config import CFG
-from functions.geoportal.v3.state import ReactiveRefs
-from functions.geoportal.v3.basemap import (
+from functions.geoportal.v5.config import CFG
+from functions.geoportal.v5.state import ReactiveRefs
+from functions.geoportal.v5.basemap import (
     create_base_map, osm_layer, esri_world_imagery_layer,
     ensure_controls, ensure_base_layers,
 )
-from functions.geoportal.v3.layers import (
+from functions.geoportal.v5.layers import (
     remove_prior_groups, add_group_and_fit,
     upsert_overlay_by_name, set_layer_visibility, set_layer_opacity,
 )
-from functions.geoportal.v3.widgets import use_debounce, GeoJSONDrop
-from functions.geoportal.v3.errors import Toast, use_toast
-from functions.geoportal.v3.geojson_loader import load_icon_group_from_geojson
-from functions.geoportal.v3.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
+from functions.geoportal.v5.widgets import use_debounce, GeoJSONDrop
+from functions.geoportal.v5.errors import Toast, use_toast
+from functions.geoportal.v5.geojson_loader import load_icon_group_from_geojson
+from functions.geoportal.v5.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
+from functions.geoportal.v5.center_pivot_loader import build_center_pivot_layer
 
 
 # -------------------------
@@ -40,7 +41,6 @@ def ping():
 # -------------------------
 # External tiles server base (manual)
 # -------------------------
-# Set CFG.tiles_http_base in your config.py, e.g. "http://127.0.0.1:8766"
 TILES_HTTP_BASE: str = getattr(CFG, "tiles_http_base", "http://127.0.0.1:8766")
 
 
@@ -106,8 +106,6 @@ def _legend_inline_row():
     title = getattr(CFG, "raster_legend_title", "")
 
     row_children = []
-
-    # title (small inline)
     if title:
         row_children.append(
             solara.Markdown(f"**{title}:**", style={"marginRight": "8px", "whiteSpace": "nowrap"})
@@ -124,18 +122,10 @@ def _legend_inline_row():
                 "marginRight": "4px",
             }
         )
-        label = solara.Markdown(
-            f"{it['name']}",
-            style={"marginRight": "12px", "whiteSpace": "nowrap"}
-        )
+        label = solara.Markdown(f"{it['name']}", style={"marginRight": "12px", "whiteSpace": "nowrap"})
         row_children.extend([color_box, label])
 
-    return solara.Row(
-        children=row_children,
-        gap="4px",
-        style={"alignItems": "center"}
-    )
-
+    return solara.Row(children=row_children, gap="4px", style={"alignItems": "center"})
 
 
 # -------------------------
@@ -168,6 +158,24 @@ def Page():
     zmin, set_zmin = solara.use_state(None)
     zmax, set_zmax = solara.use_state(None)
     tile_bounds, set_tile_bounds = solara.use_state(None)
+
+    # --- Center-Pivot state ---
+    years = list(getattr(CFG, "center_pivot_years", (2021,)))
+    # slider over indices because years are sparse
+    year_index_map = {i: y for i, y in enumerate(years)}
+    index_by_year = {y: i for i, y in enumerate(years)}
+
+    cp_year_index, set_cp_year_index = solara.use_state(
+        index_by_year.get(int(getattr(CFG, "center_pivot_default_year", years[-1])), 0)
+    )
+    cp_visible, set_cp_visible = solara.use_state(False)
+    cp_opacity, set_cp_opacity = solara.use_state(0.6)
+
+    # Defaults: Clip ROI ON + HTTP ON (HTTP auto-disabled when clipping)
+    cp_use_http, set_cp_use_http = solara.use_state(True)
+    cp_clip_roi_enabled, set_cp_clip_roi_enabled = solara.use_state(True)
+
+    cp_layer, set_cp_layer = solara.use_state(None)
 
     # Map & base layers
     m = solara.use_memo(lambda: create_base_map(CFG.map_center, CFG.map_zoom, CFG.map_width, CFG.map_height), [])
@@ -214,7 +222,7 @@ def Page():
             max_zoom=22 if zmax is None else max(22, zmax),
             no_wrap=True,
             tile_size=256,
-            tms=False,  # TMS (flip Y) removed; using XYZ only
+            tms=False,  # XYZ
             attribution="© local tiles",
         )
         try:
@@ -223,10 +231,7 @@ def Page():
             pass
         return layer
 
-    raster_layer = solara.use_memo(
-        _build_raster_layer,
-        [debounced_raster_dir, tile_ext, raster_opacity, zmin, zmax]
-    )
+    raster_layer = solara.use_memo(_build_raster_layer, [debounced_raster_dir, tile_ext, raster_opacity, zmin, zmax])
 
     def _attach_layer():
         if raster_layer is None:
@@ -285,8 +290,90 @@ def Page():
         layers.append(icon_group)
         m.layers = layers
 
-    # keep sensors on top after any raster change
     solara.use_effect(_sync_markers, [icon_group, bounds, raster_layer, raster_visible, raster_opacity])
+
+    # -------------------------
+    # Center-Pivot build/attach helpers
+    # -------------------------
+    def _ensure_cp_layer():
+        nonlocal cp_layer
+        if not cp_visible:
+            return  # don't build when hidden
+
+        # remove old base layer if present
+        if cp_layer and (cp_layer in m.layers):
+            try:
+                m.remove_layer(cp_layer)
+            except Exception:
+                pass
+
+        clip_bbox = tuple(getattr(CFG, "center_pivot_default_roi", (24.0, 40.0, 28.0, 45.0))) if cp_clip_roi_enabled else None
+
+        layer, err = build_center_pivot_layer(
+            year_index_map.get(cp_year_index, years[-1]),
+            visible=True,
+            use_http_url=bool(cp_use_http and (clip_bbox is None)),
+            clip_to_bbox=clip_bbox,
+            m=m,
+            active_marker_ref=refs.active_marker_ref,
+        )
+        if err:
+            show_toast(err, "error")
+            set_cp_layer(None)
+            return
+
+        # apply opacity tweak to base layer
+        try:
+            layer.style = {**(layer.style or {}), "fillOpacity": float(cp_opacity)}
+        except Exception:
+            pass
+
+        set_cp_layer(layer)
+        upsert_overlay_by_name(m, layer, below_markers=True)
+        # keep sensors on top if present
+        if icon_group:
+            layers = [ly for ly in m.layers if ly is not layer and ly is not icon_group]
+            layers += [layer, icon_group]
+            m.layers = layers
+
+    # build when visible and inputs change
+    solara.use_effect(_ensure_cp_layer, [cp_visible, cp_year_index, cp_opacity, cp_use_http, cp_clip_roi_enabled])
+
+    def _apply_cp_visibility():
+        if cp_layer is None:
+            return
+        if (not cp_visible) and (cp_layer in m.layers):
+            try:
+                m.remove_layer(cp_layer)
+            except Exception:
+                pass
+
+        # also remove highlight layer when turning off
+        if not cp_visible and hasattr(m, "_cpf_highlight_layer") and m._cpf_highlight_layer:
+            try:
+                if m._cpf_highlight_layer in m.layers:
+                    m.remove_layer(m._cpf_highlight_layer)
+                m._cpf_highlight_layer = None
+            except Exception:
+                pass
+
+    solara.use_effect(_apply_cp_visibility, [cp_visible, cp_layer])
+
+    # keep order after raster changes (base cpf then highlight then sensors)
+    def _bubble_layers_after_raster():
+        hl = getattr(m, "_cpf_highlight_layer", None)
+        if not (hl and (hl in m.layers) and cp_layer and (cp_layer in m.layers)):
+            return
+        try:
+            layers = [ly for ly in m.layers if ly not in (cp_layer, hl)]
+            layers += [cp_layer, hl]
+            if icon_group and (icon_group in m.layers):
+                layers = [ly for ly in layers if ly is not icon_group] + [icon_group]
+            m.layers = layers
+        except Exception:
+            pass
+
+    solara.use_effect(_bubble_layers_after_raster, [raster_layer, raster_visible, raster_opacity, cp_layer])
 
     # -------------------------
     # UI
@@ -294,30 +381,67 @@ def Page():
     with solara.Column(gap="0.75rem"):
         solara.Markdown("### 🌴 Geoportal for Date Palm Field Informatics")
 
-        # GeoJSON controls
-        #with solara.Row(gap="0.75rem", style={"align-items": "flex-end"}):
-            #solara.InputText(label="GeoJSON path:", value=geojson_path, on_value=set_geojson_path, continuous_update=True)
-        #GeoJSONDrop(on_saved_path=set_geojson_path, label="...or drag & drop a .geojson to use it")
+        # Unified controls row: Tree–Vege + Center-Pivot
+        with solara.Card("", style={"padding": "12px"}):
+            with solara.Row(
+                gap="1rem",
+                style={
+                    "alignItems": "flex-end",
+                    "flexWrap": "nowrap",      # keep on ONE row
+                    "overflowX": "auto",       # allow horizontal scroll if narrow
+                    "whiteSpace": "nowrap",
+                },
+            ):
+                # ==== Tree–Vege (raster) ====
+                with solara.Column(
+                    style={
+                        "flex": "1 1 0",
+                        "minWidth": "380px",
+                    }
+                ):
+                    solara.Markdown("**Tree–Vege–Bare Classification**")
+                    with solara.Row(gap="0.75rem", style={"alignItems": "center", "flexWrap": "nowrap"}):
+                        solara.Switch(label="Visible", value=raster_visible, on_value=set_raster_visible)
+                        with solara.Div(style={"width": "220px"}):
+                            solara.SliderFloat(
+                                label="Opacity",
+                                value=raster_opacity,
+                                min=0.0, max=1.0, step=0.01,
+                                on_value=set_raster_opacity,
+                            )
+                    _legend_inline_row()
 
-        # Raster overlay controls + Legend (outside the map)
-        with solara.Card("Tree-Vege-Bare Classification", style={"padding": "10px"}):
-            with solara.Row(gap="0.75rem", style={"alignItems": "center", "flexWrap": "wrap"}):
-                #solara.InputText(
-                #    label="Tiles folder (…/z/x/y.{png|jpg})",
-                #    value=raster_dir, on_value=set_raster_dir, continuous_update=True,
-                #    style={"minWidth": "520px"}
-                #)
-                solara.Switch(label="Visible", value=raster_visible, on_value=set_raster_visible)
-                with solara.Div(style={"width": "220px"}):
-                    solara.SliderFloat(
-                        label="Opacity",
-                        value=raster_opacity,
-                        min=0.0, max=1.0, step=0.01,
-                        on_value=set_raster_opacity,
-                    )
+                # thin spacer
+                solara.Div(style={"width": "1px", "height": "48px", "background": "#e0e0e0", "margin": "0 6px"})
 
-                # 👉 INLINE LEGEND
-                _legend_inline_row()
+                # ==== Center-Pivot (CPF) ====
+                with solara.Column(
+                    style={
+                        "flex": "0 0 auto",
+                        "width": "560px",
+                    }
+                ):
+                    solara.Markdown("**Center-Pivot Fields (CPF)**")
+                    with solara.Row(gap="0.75rem", style={"alignItems": "center", "flexWrap": "nowrap"}):
+                        solara.Switch(label="Visible", value=cp_visible, on_value=set_cp_visible)
+
+                        # Slider over sparse years (index-based)
+                        with solara.Div(style={"width": "360px"}):
+                            solara.SliderInt(
+                                label=f"Year: {year_index_map.get(cp_year_index)}",
+                                value=cp_year_index,
+                                min=0,
+                                max=len(years) - 1,
+                                step=1,
+                                on_value=set_cp_year_index,
+                            )
+
+                        with solara.Div(style={"width": "220px"}):
+                            solara.SliderFloat(
+                                label="Opacity",
+                                value=cp_opacity, min=0.1, max=1.0, step=0.05,
+                                on_value=set_cp_opacity,
+                            )
 
         # Map
         solara.display(m)
@@ -331,3 +455,5 @@ def Page():
         Toast(message=toast_state["message"], kind=toast_state["kind"], visible=toast_state["visible"], on_close=hide_toast)
 
     return
+
+

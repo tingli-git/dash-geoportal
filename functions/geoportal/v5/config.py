@@ -1,4 +1,4 @@
-# functions/geoportal/v3/config.py
+# functions/geoportal/v5/config.py
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -76,5 +76,22 @@ class Config:
             band_fill_rgba_odd="rgba(0,0,0,0.05)",
         )
     )
+    
+    # --- Center-Pivot (CPF) GeoJSONs ---
+    center_pivot_dir: Path = Path(
+        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/center_pivot"
+    )
+    # If serving via `python -m http.server 8766` from app_server, this resolves to .../center_pivot
+    center_pivot_http_base: str = "http://127.0.0.1:8766/center_pivot"
+    center_pivot_layer_name: str = "Center-Pivot Fields"
+    center_pivot_years: tuple[int, ...] = (1995,2000,2005,2010,2015,2016,2017,2018,2019,2020,2021,2022,2023)
+    center_pivot_default_year: int = 2023
+
+    # Optional default ROI clipping (lat_min, lon_min, lat_max, lon_max)
+    # Your note: "28,40 to 24,45" -> (south=24, west=40, north=28, east=45)
+    center_pivot_default_roi: tuple[float, float, float, float] = (24.0, 40.0, 28.0, 45.0)
+ 
+    
+    
 
 CFG = Config()
