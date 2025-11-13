@@ -77,7 +77,7 @@ def show_popup(
     if on_show_timeseries is not None:
         # Optional inline plot control
         btn = W.Button(
-            description="Show time series",
+            description="Show Soil Moisture Sensor Reads",
             button_style="primary",
             layout=W.Layout(margin="6px 0 0 0"),
             tooltip="Load and display the related time series below",

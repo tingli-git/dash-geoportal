@@ -1,4 +1,4 @@
-# functions/geoportal/v5/app.py
+# functions/geoportal/v6/app.py
 # source .venv/bin/activate
 # cd /datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server
 # python -m http.server 8766 
@@ -14,22 +14,22 @@ import ipywidgets as W
 from starlette.responses import PlainTextResponse
 from solara.server.fastapi import app as solara_app
 
-from functions.geoportal.v5.config import CFG
-from functions.geoportal.v5.state import ReactiveRefs
-from functions.geoportal.v5.basemap import (
+from functions.geoportal.v6.config import CFG
+from functions.geoportal.v6.state import ReactiveRefs
+from functions.geoportal.v6.basemap import (
     create_base_map, osm_layer, esri_world_imagery_layer,
     ensure_controls, ensure_base_layers,
 )
-from functions.geoportal.v5.layers import (
+from functions.geoportal.v6.layers import (
     remove_prior_groups, add_group_and_fit,
     upsert_overlay_by_name, set_layer_visibility, set_layer_opacity,
 )
-from functions.geoportal.v5.widgets import use_debounce, GeoJSONDrop
-from functions.geoportal.v5.errors import Toast, use_toast
-from functions.geoportal.v5.geojson_loader import load_icon_group_from_geojson
-from functions.geoportal.v5.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
-from functions.geoportal.v5.center_pivot_loader import build_center_pivot_layer
-from functions.geoportal.v5.datepalm_loader import build_datepalms_layer  # NEW
+from functions.geoportal.v6.widgets import use_debounce, GeoJSONDrop
+from functions.geoportal.v6.errors import Toast, use_toast
+from functions.geoportal.v6.geojson_loader import load_icon_group_from_geojson
+from functions.geoportal.v6.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
+from functions.geoportal.v6.center_pivot_loader import build_center_pivot_layer
+from functions.geoportal.v6.datepalm_loader import build_datepalms_layer  # NEW
 
 
 # -------------------------
@@ -143,9 +143,9 @@ def Page():
     geojson_path, set_geojson_path = solara.use_state(str(CFG.default_geojson))
     debounced_geojson = use_debounce(geojson_path, delay_ms=500)
     refs = ReactiveRefs()
-
-    ts_title, set_ts_title = solara.use_state("")
-    ts_df, set_ts_df = solara.use_state(None)
+    ## turn off the below two line if not showing as page at the bottom of the map window
+    #ts_title, set_ts_title = solara.use_state("")
+    #ts_df, set_ts_df = solara.use_state(None)
 
     default_tiles_dir = str(getattr(
         CFG, "default_tiles_dir",
@@ -275,15 +275,33 @@ def Page():
 
     # Markers / popups
     def on_show_timeseries(props: dict):
+        #try:
+        #    csv_path = resolve_csv_path(props)
+        #    df = read_timeseries(csv_path)
+        #    title = f"Sensor time series — {props.get('name') or props.get('sensor_id') or props.get('id') or csv_path.stem}"
+        #    set_ts_df(df); set_ts_title(title)
+        #    show_toast(f"Loaded {csv_path}", "success")
+        #    return build_plotly_widget(df, title)
+        #except Exception as e:
+        #    set_ts_df(None); set_ts_title("")
+        #    show_toast(str(e), "error")
+        #    return W.HTML(f"<pre>{e}</pre>")
+        
+        """
+        Build a Plotly widget for the clicked sensor and show it ONLY in the popup.
+        No more bottom-of-map time series panel.
+        """
         try:
             csv_path = resolve_csv_path(props)
             df = read_timeseries(csv_path)
-            title = f"Sensor time series — {props.get('name') or props.get('sensor_id') or props.get('id') or csv_path.stem}"
-            set_ts_df(df); set_ts_title(title)
+            title = (
+                f"Sensor time series — "
+                f"{props.get('name') or props.get('sensor_id') or props.get('id') or csv_path.stem}"
+            )
             show_toast(f"Loaded {csv_path}", "success")
+            # This widget is rendered inside the popup by show_popup()
             return build_plotly_widget(df, title)
         except Exception as e:
-            set_ts_df(None); set_ts_title("")
             show_toast(str(e), "error")
             return W.HTML(f"<pre>{e}</pre>")
 
@@ -494,12 +512,18 @@ def Page():
                             )
 
         solara.display(m)
-
-        if ts_df is not None:
-            with solara.Column(style={"width": "100%"}):
-                solara.Markdown(f"**{ts_title}**")
-                TimeSeriesFigure(ts_df, title=ts_title)
-
-        Toast(message=toast_state["message"], kind=toast_state["kind"], visible=toast_state["visible"], on_close=hide_toast)
+        ## turn off if not showing the time sereis at the map window bottom
+        #if ts_df is not None:
+        #    with solara.Column(style={"width": "100%"}):
+        #        solara.Markdown(f"**{ts_title}**")
+        #        TimeSeriesFigure(ts_df, title=ts_title)
+#
+        #Toast(message=toast_state["message"], kind=toast_state["kind"], visible=toast_state["visible"], on_close=hide_toast)
+        Toast(
+            message=toast_state["message"],
+            kind=toast_state["kind"],
+            visible=toast_state["visible"],
+            on_close=hide_toast,
+        )
 
     return

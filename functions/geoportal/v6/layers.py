@@ -1,10 +1,10 @@
-# functions/geoportal/v5/layers.py
+# functions/geoportal/v6/layers.py
 from __future__ import annotations
 from typing import Iterable, Sequence, Tuple, Optional, Union, List
 import ipyleaflet
 
 # 👉 bring in your utils
-from functions.geoportal.v5.utils import padded_bounds  # html_table_popup is UI-level; not needed here
+from functions.geoportal.v6.utils import padded_bounds  # html_table_popup is UI-level; not needed here
 
 Bounds = List[List[float]]  # [[south, west], [north, east]]
 CoordSeq = Sequence[tuple[float, float]]

@@ -1,4 +1,4 @@
-# functions/geoportal/v5/timeseries.py
+# functions/geoportal/v6/timeseries.py
 from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import ipywidgets as W
 import solara
-from functions.geoportal.v5.config import CFG
+from functions.geoportal.v6.config import CFG
 
 # ------------------------------
 # Depth mapping legend
@@ -49,6 +49,7 @@ _PALETTES = {
     "kaarten_ova": _KAARTEN_OVA,
 }
 
+
 def _resolve_palette(n: int) -> list[str]:
     cfg_colors = _ts_param("colors")
     if isinstance(cfg_colors, (list, tuple)) and len(cfg_colors) > 0:
@@ -56,6 +57,7 @@ def _resolve_palette(n: int) -> list[str]:
     name = getattr(CFG.timeseries, "palette_name", "kaarten_ova")
     pal = _PALETTES.get(name, _KAARTEN_OVA)
     return [pal[i % len(pal)] for i in range(n)]
+
 
 # ------------------------------
 # CSV resolver and reader
@@ -69,6 +71,7 @@ def resolve_csv_path(props: dict) -> Path:
         raise FileNotFoundError("No 'csv_path' or 'sensor_id'/'id' in properties.")
     return CFG.sensor_csv_dir / f"{sensor_id}.csv"
 
+
 def read_timeseries(csv_path: Path) -> pd.DataFrame:
     """Read sensor CSV and set the time column as datetime index."""
     if not csv_path.exists():
@@ -77,7 +80,9 @@ def read_timeseries(csv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
 
     time_col = None
-    for cand in getattr(CFG, "time_col_candidates", ("Date Time", "Datetime", "Timestamp", "Date", "date")):
+    for cand in getattr(
+        CFG, "time_col_candidates", ("Date Time", "Datetime", "Timestamp", "Date", "date")
+    ):
         if cand in df.columns:
             time_col = cand
             break
@@ -92,6 +97,7 @@ def read_timeseries(csv_path: Path) -> pd.DataFrame:
         raise ValueError(f"No numeric columns in {csv_path}")
     return num
 
+
 # ------------------------------
 # Utilities
 # ------------------------------
@@ -102,12 +108,14 @@ def _to_time_strings(index_like, fmt: str = "%Y-%m-%d %H:%M:%S") -> pd.Index:
     ser = pd.to_datetime(index_like, errors="coerce")
     return pd.Series(ser).dt.strftime(fmt).to_numpy()
 
+
 def _ensure_percent(series: pd.Series) -> pd.Series:
     """If values look like 0–1, convert to %, else pass-through."""
     s = pd.to_numeric(series, errors="coerce")
     if s.dropna().max() is not None and s.dropna().max() <= 1.00001:
         return s * 100.0
     return s
+
 
 # ------------------------------
 # Timeseries parameter resolution (single source of truth)
@@ -127,6 +135,7 @@ _DEFAULT_TS = SimpleNamespace(
     line_width=2,
 )
 
+
 def _ts_param(name: str):
     ts = getattr(CFG, "timeseries", None)
     if ts is not None and hasattr(ts, name):
@@ -134,6 +143,7 @@ def _ts_param(name: str):
     if hasattr(_DEFAULT_TS, name):
         return getattr(_DEFAULT_TS, name)
     raise AttributeError(f"timeseries param '{name}' missing on both CFG.timeseries and _DEFAULT_TS")
+
 
 # ------------------------------
 # Common layout helpers
@@ -205,8 +215,9 @@ def _apply_common_layout_dual(
         zeroline=False,
     )
 
+
 # ------------------------------
-# Solara component (Leaflet popup figure)
+# Solara component (Leaflet bottom-of-page figure)
 # ------------------------------
 @solara.component
 def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series"):
@@ -257,9 +268,9 @@ def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series")
         rows=2, cols=1,
         shared_xaxes=True,
         vertical_spacing=0.08,
-        row_heights=[0.9, 1.6]  # top ~smaller, bottom larger
+        row_heights=[0.9, 1.6],  # top ~smaller, bottom larger
     )
-    
+
     # ---------- TOP subplot: soil_moisture_root_zone with y-bands ----------
     if sm_column in num_df.columns:
         sm = _ensure_percent(num_df[sm_column])
@@ -279,12 +290,13 @@ def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series")
             fig.update_layout(shapes=region_shapes)
 
         fig.add_scatter(
-            x=x_str, y=sm,
+            x=x_str,
+            y=sm,
             mode="lines",
-            name=f"Soil Moisture (Root Zone)",
+            name="Soil Moisture (Root Zone)",
             line=dict(width=line_width, color="#4477AA"),
             hovertemplate="Time: %{x}<br>SM root zone: %{y:.2f}%<extra></extra>",
-            row=1, col=1
+            row=1, col=1,
         )
         fig.update_yaxes(range=[ymin, ymax], row=1, col=1)
 
@@ -307,13 +319,13 @@ def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series")
                 text=txt,
                 showarrow=False,
                 font=dict(size=12, color="#333"),
-                align="left"
+                align="left",
             )
 
     # ---------- BOTTOM subplot: stacked depth bands (normalized) ----------
     colors = _resolve_palette(len(cols))
     band_even = _ts_param("band_fill_rgba_even")
-    band_odd  = _ts_param("band_fill_rgba_odd")
+    band_odd = _ts_param("band_fill_rgba_odd")
 
     if show_bands and len(x_str) >= 2:
         x0, x1 = x_str[0], x_str[-1]
@@ -322,11 +334,13 @@ def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series")
             y0 = i * (1 + gap_frac)
             y1 = y0 + 1
             fill = band_even if i % 2 == 0 else band_odd
-            zebra.append(dict(
-                type="rect", xref="x2", yref="y2",
-                x0=x0, x1=x1, y0=y0, y1=y1,
-                fillcolor=fill, line=dict(width=0), layer="below"
-            ))
+            zebra.append(
+                dict(
+                    type="rect", xref="x2", yref="y2",
+                    x0=x0, x1=x1, y0=y0, y1=y1,
+                    fillcolor=fill, line=dict(width=0), layer="below",
+                )
+            )
         # keep existing region shapes for top; extend with zebra for bottom
         cur_shapes = list(fig.layout.shapes) if fig.layout.shapes else []
         fig.update_layout(shapes=tuple(cur_shapes + zebra))
@@ -356,7 +370,7 @@ def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series")
                 "Value: %{customdata:.3f}%<extra></extra>"
             ),
             line=dict(width=line_width, color=colors[i]),
-            row=2, col=1
+            row=2, col=1,
         )
 
     _apply_common_layout_dual(
@@ -369,20 +383,29 @@ def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series")
         labels_bottom=labels,
     )
 
-    solara.Style("""
+    solara.Style(
+        """
     .timeseries-stacked {
         overflow-x: auto;
         overflow-y: auto;
     }
-    """)
+    """
+    )
 
     with solara.Div(classes=["timeseries-stacked"]):
         return solara.FigurePlotly(fig)
 
+
+# ------------------------------
+# Popup widget (ipywidgets)
+# ------------------------------
 # ------------------------------
 # Popup widget (ipywidgets)
 # ------------------------------
 def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
+    """
+    Build the sensor time series for use INSIDE a popup (no bottom panel).
+    """
     if df is None or df.empty:
         return W.HTML("<i>No data to plot.</i>")
 
@@ -392,19 +415,23 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
     if not cols:
         return W.HTML("<i>No numeric columns available for plotting.</i>")
 
+    # X-axis as nice time strings (avoids 1e18-style ticks)
     x = pd.to_datetime(num_df.index, errors="coerce")
-    x_str = _to_time_strings(x)
+    x_str = _to_time_strings(x, fmt="%Y-%m-%d %H:%M")
 
     labels = [DEPTH_LEGENDS.get(c, c) for c in cols]
 
-    manual_width = _ts_param("width")
+    # 👉 Popup-friendly but BIGGER size
+    manual_width = 1800          # was 1100
+    popup_height = 800           # was 650
+
     gap_frac = _ts_param("gap_frac")
     band_height_px = _ts_param("band_height_px")
     reverse_depth = _ts_param("reverse_depth")
     show_bands = _ts_param("show_background_bands")
     line_width = _ts_param("line_width")
 
-    # NEW: read config for top subplot & zebra
+    # Read config for top subplot & zebra
     sm_column = _ts_param("sm_column")
     t0, t1, t2 = _ts_param("sm_region_thresholds")
     c_warn, c_stress, c_normal, c_sat = _ts_param("sm_region_colors")
@@ -420,14 +447,15 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
 
     # FigureWidget + subplots
     base_fig = make_subplots(
-        rows=2, cols=1,
+        rows=2,
+        cols=1,
         shared_xaxes=True,
         vertical_spacing=0.08,
-        row_heights=[0.9, 1.6]
+        row_heights=[0.9, 1.6],
     )
     fig = go.FigureWidget(base_fig)
 
-    # TOP subplot: soil moisture with bands
+    # ---------- TOP subplot ----------
     if sm_column in num_df.columns:
         sm = _ensure_percent(num_df[sm_column])
         ymax = float(max(sm_min_ceiling, (sm.max(skipna=True) or 0) + sm_pad))
@@ -439,32 +467,31 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
                 dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=0,  y1=t0, fillcolor=c_warn,   line=dict(width=0), layer="below", opacity=0.35),
                 dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t0, y1=t1, fillcolor=c_stress, line=dict(width=0), layer="below", opacity=0.35),
                 dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t1, y1=t2, fillcolor=c_normal, line=dict(width=0), layer="below", opacity=0.35),
-                dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t2, y1=ymax,fillcolor=c_sat,   line=dict(width=0), layer="below", opacity=0.35),
+                dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t2, y1=ymax, fillcolor=c_sat,  line=dict(width=0), layer="below", opacity=0.35),
             ]
             fig.layout.shapes = tuple(region_shapes)
 
         fig.add_scatter(
-            x=x_str, y=sm,
+            x=x_str,
+            y=sm,
             mode="lines",
-            name=f"Soil Moisture (Root Zone)",
+            name="Soil Moisture (Root Zone)",
             line=dict(width=line_width, color="#4477AA"),
             hovertemplate="Time: %{x}<br>SM root zone: %{y:.2f}%<extra></extra>",
-            row=1, col=1
+            row=1,
+            col=1,
         )
         fig.update_yaxes(range=[ymin, ymax], row=1, col=1)
 
-        # Turn OFF grid for the top subplot
         fig.update_yaxes(showgrid=False, row=1, col=1)
         fig.update_xaxes(showgrid=False, row=1, col=1)
 
-        # Threshold lines
         for thr, dash in [(t0, "dot"), (t1, "dot"), (t2, "dash")]:
             fig.add_hline(y=thr, line_width=1, line_dash=dash, line_color="#555", row=1, col=1)
 
-        # Annotations just ABOVE each lower threshold line: 0, t0, t1, t2
-        labels_top = ["Warning", "Stress", "Refill", "Full"]  # bottom → top
+        labels_top = ["Warning", "Stress", "Refill", "Full"]
         y_lines = [ymin, t0, t1, t2]
-        dy = max(0.5, 0.02 * (ymax - ymin))  # small vertical offset
+        dy = max(0.5, 0.02 * (ymax - ymin))
         for txt, yline in zip(labels_top, y_lines):
             fig.add_annotation(
                 xref="paper", x=0.01,
@@ -472,10 +499,10 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
                 text=txt,
                 showarrow=False,
                 font=dict(size=12, color="#333"),
-                align="left"
+                align="left",
             )
 
-    # BOTTOM subplot: stacked bands
+    # ---------- BOTTOM subplot ----------
     colors = _resolve_palette(len(cols))
     if show_bands and len(x_str) >= 2:
         x0, x1 = x_str[0], x_str[-1]
@@ -484,12 +511,13 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
             y0 = i * (1 + gap_frac)
             y1 = y0 + 1
             fill = band_even if i % 2 == 0 else band_odd
-            zebra.append(dict(
-                type="rect", xref="x2", yref="y2",
-                x0=x0, x1=x1, y0=y0, y1=y1,
-                fillcolor=fill, line=dict(width=0), layer="below"
-            ))
-        # extend shapes
+            zebra.append(
+                dict(
+                    type="rect", xref="x2", yref="y2",
+                    x0=x0, x1=x1, y0=y0, y1=y1,
+                    fillcolor=fill, line=dict(width=0), layer="below",
+                )
+            )
         cur_shapes = list(fig.layout.shapes) if fig.layout.shapes else []
         fig.layout.shapes = tuple(cur_shapes + zebra)
 
@@ -502,7 +530,7 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
         offset = i * (1 + gap_frac)
         y_stack = (y_norm + offset).to_numpy()
 
-        fig.add_scattergl(
+        fig.add_scatter(
             x=x_str,
             y=y_stack,
             mode="lines",
@@ -515,18 +543,49 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
                 "Value: %{customdata:.3f}%<extra></extra>"
             ),
             line=dict(width=line_width, color=colors[i]),
-            row=2, col=1
+            row=2,
+            col=1,
         )
 
-    # Layout across both subplots
+    # Make sure all stacked bands are visible
+    max_band_top = (len(cols) - 1) * (1 + gap_frac) + 1
+    fig.update_yaxes(
+        row=2,
+        col=1,
+        range=[-0.2, max_band_top + 0.2],
+        showgrid=False,
+        zeroline=False,
+    )
+
+    # Layout: use larger height for popup
     _apply_common_layout_dual(
         fig,
         title=title,
         width=manual_width,
-        height=None,
+        height=popup_height,
         band_height_px=band_height_px,
         gap_frac=gap_frac,
         labels_bottom=labels,
     )
 
-    return W.Box([fig], layout=W.Layout(width="100%", overflow_x="auto"))
+    fig.update_layout(
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+    )
+
+    fig.update_xaxes(
+        row=2,
+        col=1,
+        tickangle=-45,
+    )
+
+    # 👉 Make the widget itself large in the popup, with scroll if needed
+    return W.Box(
+        [fig],
+        layout=W.Layout(
+            width=f"{manual_width}px",     # match manual_width
+            height="820px",     # a bit larger than figure height
+            overflow_x="auto",
+            overflow_y="auto",
+        ),
+    )

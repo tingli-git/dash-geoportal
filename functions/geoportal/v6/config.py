@@ -1,4 +1,4 @@
-# functions/geoportal/v5/config.py
+# functions/geoportal/v6/config.py
 from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +28,13 @@ class Config:
     # --- Timeseries CSVs ---
     sensor_csv_dir: Path = Path("/datawaha/esom/DatePalmCounting/Geoportal/Sensors/SensorReads/")
     time_col_candidates: tuple[str, ...] = ("timestamp", "time", "datetime", "date", "Date Time")
+    # --- NDVI time series for Date Palm polygons ---
+    # CSVs named as <Field_id>.csv with 2 columns: [date, ndvi_median]
+    ndvi_csv_dir: Path = Path(
+        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/ndvi_timeseries_csvs"
+    )
+    # Optional HTTP base if you prefer loading via http.server
+    ndvi_http_base: str = "http://127.0.0.1:8766/ndvi_timeseries_csvs"
 
     # --- Local XYZ tiles (filesystem source) ---
     default_tiles_dir: Path = Path(
