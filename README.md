@@ -15,6 +15,27 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+## 0.5) Run the Geoportal v8 Solara stack
+```bash
+# functions/geoportal/v8/app.py
+# cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
+# source .venv/bin/activate
+# cd /datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server
+# python -m http.server 8766 
+#-----------------------------------
+# in another terminal:
+# cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
+# source .venv/bin/activate
+# python -m pip install -e .
+# solara run --production /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/functions/geoportal/v8/app.py 
+## if solara not founded, run $ hash -r 
+# solara application will be running at localhost:8765
+# ------------------------------------
+# in the third terminal 
+# cloudflared tunnel --url http://localhost:8765
+# copy the url that can be shared to others
+```
+
 ## 1) Run
 ```bash
 python app.py
