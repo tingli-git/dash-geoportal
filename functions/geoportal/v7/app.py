@@ -1,4 +1,4 @@
-# functions/geoportal/v6/app.py
+# functions/geoportal/v7/app.py
 # cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
 # source .venv/bin/activate
 # # check required pkgs use $ python -m pip list
@@ -9,7 +9,7 @@
 # cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
 # source .venv/bin/activate
 # python -m pip install -e .
-# solara run --production /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/functions/geoportal/v6/app.py 
+# solara run --production /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/functions/geoportal/v7/app.py 
 ## if solara not founded, run $ hash -r 
 # solara application will be running at localhost:8765
 # ------------------------------------
@@ -28,22 +28,23 @@ import ipywidgets as W
 from starlette.responses import PlainTextResponse
 from solara.server.fastapi import app as solara_app
 
-from functions.geoportal.v6.config import CFG
-from functions.geoportal.v6.state import ReactiveRefs
-from functions.geoportal.v6.basemap import (
+from functions.geoportal.v7.config import CFG
+from functions.geoportal.v7.state import ReactiveRefs
+from functions.geoportal.v7.basemap import (
     create_base_map, osm_layer, esri_world_imagery_layer,
     ensure_controls, ensure_base_layers,
 )
-from functions.geoportal.v6.layers import (
+from functions.geoportal.v7.layers import (
     remove_prior_groups, add_group_and_fit,
     upsert_overlay_by_name, set_layer_visibility, set_layer_opacity,
 )
-from functions.geoportal.v6.widgets import use_debounce, GeoJSONDrop
-from functions.geoportal.v6.errors import Toast, use_toast
-from functions.geoportal.v6.geojson_loader import load_icon_group_from_geojson
-from functions.geoportal.v6.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
-from functions.geoportal.v6.center_pivot_loader import build_center_pivot_layer
-from functions.geoportal.v6.datepalm_loader import build_datepalms_layer  # NEW
+from functions.geoportal.v7.widgets import use_debounce, GeoJSONDrop
+from functions.geoportal.v7.errors import Toast, use_toast
+from functions.geoportal.v7.geojson_loader import load_icon_group_from_geojson
+from functions.geoportal.v7.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
+from functions.geoportal.v7.center_pivot_loader import build_center_pivot_layer
+from functions.geoportal.v7.datepalm_loader import build_datepalms_layer  # NEW
+from functions.geoportal.v7.tree_health_loader import build_tree_health_layer
 
 
 # -------------------------
@@ -197,6 +198,10 @@ def Page():
     dp_visible, set_dp_visible = solara.use_state(True)
     dp_opacity, set_dp_opacity = solara.use_state(0.55)  # slightly higher default
     dp_layer, set_dp_layer = solara.use_state(None)
+
+    # --- Tree Health state ---
+    th_visible, set_th_visible = solara.use_state(True)
+    th_layer, set_th_layer = solara.use_state(None)
 
     # Map & base layers
     m = solara.use_memo(lambda: create_base_map(CFG.map_center, CFG.map_zoom, CFG.map_width, CFG.map_height), [])
@@ -453,6 +458,48 @@ def Page():
     solara.use_effect(_apply_dp_visibility, [dp_visible, dp_layer])
 
     # -------------------------
+    # Tree Health points layer
+    # -------------------------
+    def _ensure_th_layer():
+        nonlocal th_layer
+        if not th_visible:
+            return
+
+        if th_layer and (th_layer in m.layers):
+            try:
+                m.remove_layer(th_layer)
+            except Exception:
+                pass
+
+        layer, err = build_tree_health_layer(m=m, active_marker_ref=refs.active_marker_ref)
+        if err:
+            show_toast(err, "error")
+            set_th_layer(None)
+            return
+
+        set_th_layer(layer)
+        anchor = None
+        if dp_layer and (dp_layer in m.layers):
+            anchor = dp_layer
+        elif cp_layer and (cp_layer in m.layers):
+            anchor = cp_layer
+        else:
+            anchor = raster_layer
+        _insert_after(layer, anchor)
+
+    solara.use_effect(_ensure_th_layer, [th_visible, dp_layer, cp_layer, raster_layer])
+
+    def _apply_th_visibility():
+        if th_layer is None:
+            return
+        if (not th_visible) and (th_layer in m.layers):
+            try:
+                m.remove_layer(th_layer)
+            except Exception:
+                pass
+    solara.use_effect(_apply_th_visibility, [th_visible, th_layer])
+
+    # -------------------------
     # Keep sensors on top whenever either overlay (CPF/DP) changes
     # -------------------------
     def _float_sensors_top():
@@ -463,7 +510,7 @@ def Page():
             except Exception:
                 pass
             m.add_layer(icon_group)
-    solara.use_effect(_float_sensors_top, [icon_group, cp_layer, dp_layer])
+    solara.use_effect(_float_sensors_top, [icon_group, cp_layer, dp_layer, th_layer])
 
     # -------------------------
     # UI
@@ -505,6 +552,36 @@ def Page():
                                 value=dp_opacity, min=0.1, max=1.0, step=0.05,
                                 on_value=set_dp_opacity,
                             )
+
+                solara.Div(style={"width": "1px", "height": "48px", "background": "#e0e0e0", "margin": "0 6px"})
+
+                with solara.Column(style={"flex": "0 0 auto", "width": "320px"}):
+                    solara.Markdown("**Tree Health points**")
+                    with solara.Row(gap="0.75rem", style={"alignItems": "center", "flexWrap": "nowrap"}):
+                        solara.Switch(label="Visible", value=th_visible, on_value=set_th_visible)
+                    healthy_color = getattr(CFG, "tree_health_color_healthy", "#66C2A5")
+                    infested_color = getattr(CFG, "tree_health_color_infested", "#D1495B")
+                    with solara.Row(gap="0.25rem", style={"alignItems": "center"}):
+                        solara.Div(
+                            style={
+                                "width": "16px",
+                                "height": "16px",
+                                "borderRadius": "50%",
+                                "background": healthy_color,
+                                "border": "1px solid rgba(0,0,0,0.25)",
+                            }
+                        )
+                        solara.Markdown("Healthy", style={"margin": "0", "fontSize": "0.9rem"})
+                        solara.Div(
+                            style={
+                                "width": "16px",
+                                "height": "16px",
+                                "borderRadius": "50%",
+                                "background": infested_color,
+                                "border": "1px solid rgba(0,0,0,0.25)",
+                            }
+                        )
+                        solara.Markdown("Infested", style={"margin": "0", "fontSize": "0.9rem"})
 
                 solara.Div(style={"width": "1px", "height": "48px", "background": "#e0e0e0", "margin": "0 6px"})
 
