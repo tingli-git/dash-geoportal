@@ -21,19 +21,17 @@ def show_popup(
     on_show_timeseries: Optional[Callable[[dict], W.Widget | None]] = None,
     # Optional label so sensors + NDVI can use different button text
     timeseries_button_label: Optional[str] = None,
+    min_width: int | None = None,
+    max_width: int | None = None,
 ) -> None:
     """
     Open a Leaflet popup at (lat, lon) showing a key/value table from `props`,
-    and optionally a time-series widget under a button.
-
-    IMPORTANT: preserve the current map view so opening popups does not move it.
+    and optionally a time-series widget (sensor or NDVI) under a button.
     """
-
     try:
         prev_center = tuple(m.center) if m.center is not None else None
     except Exception:
         prev_center = None
-
     try:
         prev_zoom = m.zoom
     except Exception:
@@ -92,7 +90,7 @@ def show_popup(
         child = W.VBox([table, btn, out])
 
     # -------------------------
-    # Remove existing popups
+    # Replace any existing popups, then add new one
     # -------------------------
     try:
         for layer in list(m.layers):
@@ -109,27 +107,21 @@ def show_popup(
         close_on_escape_key=True,
         auto_pan=False,
         keep_in_view=False,
-        min_width=300,
-        max_width=500,
+        min_width=min_width or 1800,
+        max_width=max_width or 3000,
     )
 
     m.add_layer(popup)
 
-    # -------------------------
-    # Restore map view if anything moved it
-    # -------------------------
+    print(f"[POPUP] showing {props.get('sensor_id') or props.get('name') or 'sensor'}")
     try:
         if prev_center is not None and tuple(m.center) != tuple(prev_center):
-            print(
-                f"[DEBUG popup] map center changed during popup open: "
-                f"before={prev_center}, after={tuple(m.center)} -> restoring"
-            )
             m.center = prev_center
         if prev_zoom is not None and m.zoom != prev_zoom:
-            print(
-                f"[DEBUG popup] map zoom changed during popup open: "
-                f"before={prev_zoom}, after={m.zoom} -> restoring"
-            )
             m.zoom = prev_zoom
-    except Exception as e:
-        print(f"[DEBUG popup] failed to restore map view: {e}")
+    except Exception:
+        pass
+    if prev_center is not None:
+        setattr(m, "_pending_center_restore", prev_center)
+    if prev_zoom is not None:
+        setattr(m, "_pending_zoom_restore", prev_zoom)

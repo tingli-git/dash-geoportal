@@ -9,7 +9,7 @@
 # cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
 # source .venv/bin/activate
 # python -m pip install -e .
-# solara run --production /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/functions/geoportal/v8/app.py 
+# solara run --production /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/functions/geoportal/v7/app.py 
 ## if solara not founded, run $ hash -r 
 # solara application will be running at localhost:8765
 # ------------------------------------
@@ -35,10 +35,9 @@ from functions.geoportal.v8.basemap import (
     ensure_controls, ensure_base_layers,
 )
 from functions.geoportal.v8.layers import (
-    remove_prior_groups, add_group_and_fit,
-    upsert_overlay_by_name, set_layer_visibility, set_layer_opacity,
+    upsert_overlay_by_name, set_layer_opacity,
 )
-from functions.geoportal.v8.widgets import use_debounce, GeoJSONDrop
+from functions.geoportal.v8.widgets import use_debounce
 from functions.geoportal.v8.errors import Toast, use_toast
 from functions.geoportal.v8.geojson_loader import load_icon_group_from_geojson
 from functions.geoportal.v8.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
@@ -62,13 +61,27 @@ def ping():
 # -------------------------
 TILES_HTTP_BASE: str = getattr(CFG, "tiles_http_base", "http://127.0.0.1:8766")
 
-PRODUCTS: Tuple[Tuple[str, str], ...] = (
-    ("raster", "Tree–Vege–NonVege Classification"),
-    ("datepalms", "Date Palm Fields (Qassim)"),
-    ("tree_health", "Tree Health"),
-    ("cpf", "Center-Pivot Fields (CPF)"),
-    ("sensors", "Sensors in AlDka"),
-)
+PRODUCT_TREE_VEGE = "tree_vege"
+PRODUCT_DATEPALM = "datepalm"
+PRODUCT_TREE_HEALTH = "tree_health"
+PRODUCT_SENSORS = "sensors"
+PRODUCT_CENTER_PIVOT = "cpf"
+
+PRODUCT_ORDER = [
+    PRODUCT_TREE_VEGE,
+    PRODUCT_DATEPALM,
+    PRODUCT_TREE_HEALTH,
+    PRODUCT_SENSORS,
+    PRODUCT_CENTER_PIVOT,
+]
+
+PRODUCT_LABELS = {
+    PRODUCT_TREE_VEGE: "Tree–Vege–NonVege Classification",
+    PRODUCT_DATEPALM: "Date Palm Fields",
+    PRODUCT_TREE_HEALTH: "Tree Health",
+    PRODUCT_SENSORS: "Sensors in AlDka",
+    PRODUCT_CENTER_PIVOT: "Center-Pivot Fields",
+}
 
 
 # -------------------------
@@ -121,6 +134,13 @@ def _leaflet_bounds_from_xyz(tiles_folder: Path, z: int) -> Optional[List[List[f
     return [[south, west], [north, east]]
 
 
+def _roi_to_bounds(roi: tuple[float, float, float, float] | None) -> Optional[List[List[float]]]:
+    if not roi:
+        return None
+    south, west, north, east = roi
+    return [[south, west], [north, east]]
+
+
 # -------------------------
 # Legend: small renderer for the card (outside the map)
 # -------------------------
@@ -155,89 +175,6 @@ def _legend_inline_row():
     return solara.Row(children=row_children, gap="4px", style={"alignItems": "center"})
 
 
-def _tree_health_badges():
-    healthy_color = getattr(CFG, "tree_health_color_healthy", "#66C2A5")
-    infested_color = getattr(CFG, "tree_health_color_infested", "#D1495B")
-    healthy_count = getattr(CFG, "tree_health_healthy_count", None)
-    infested_count = getattr(CFG, "tree_health_infested_count", None)
-    def badge(color: str):
-        return solara.Div(
-            style={
-                "width": "16px",
-                "height": "16px",
-                "borderRadius": "50%",
-                "background": color,
-                "border": "1px solid rgba(0,0,0,0.25)",
-            }
-        )
-    return solara.Row(
-        children=[
-            badge(healthy_color),
-            solara.Markdown(
-                f"Healthy{f' ({healthy_count})' if healthy_count is not None else ''}",
-                style={"margin": "0", "fontSize": "0.9rem"},
-            ),
-            badge(infested_color),
-            solara.Markdown(
-                f"Infested{f' ({infested_count})' if infested_count is not None else ''}",
-                style={"margin": "0", "fontSize": "0.9rem"},
-            ),
-        ],
-        gap="0.35rem",
-        style={"alignItems": "center", "marginTop": "0.6rem"},
-    )
-
-
-def _product_legend(product: str):
-    if product == "raster":
-        return _legend_inline_row()
-    if product == "tree_health":
-        return _tree_health_badges()
-    if product == "datepalms":
-        return solara.Markdown(
-            "Date Palm Fields (Qassim) — filled polygons representing Qassim farms.",
-            style={"fontSize": "0.9rem", "color": "#444", "marginTop": "0.5rem"},
-        )
-    if product == "cpf":
-        return solara.Markdown(
-            "Center-Pivot Fields — polygons clipped via the dataset + optional ROI.",
-            style={"fontSize": "0.9rem", "color": "#444", "marginTop": "0.5rem"},
-        )
-    if product == "sensors":
-        icon_color = getattr(CFG, "icon_color_default", "blue")
-        return solara.Row(
-            children=[
-                solara.Div(
-                    style={
-                        "width": "14px",
-                        "height": "14px",
-                        "borderRadius": "50%",
-                        "background": icon_color,
-                        "border": "1px solid rgba(0,0,0,0.25)",
-                    }
-                ),
-                solara.Markdown(
-                    "Sensors in AlDka — marker color and icon defined in configuration.",
-                    style={"margin": "0", "fontSize": "0.9rem"},
-                ),
-            ],
-            gap="0.35rem",
-            style={"alignItems": "center", "marginTop": "0.5rem"},
-        )
-    return solara.Div()
-
-
-def _product_summary(product: str):
-    if product == "tree_health":
-        total = getattr(CFG, "tree_health_total_count", None)
-        if total is not None:
-            return solara.Markdown(
-                f"Total number of trees: {total}",
-                style={"marginTop": "0.5rem", "fontSize": "0.95rem", "color": "#222"},
-            )
-    return solara.Div()
-
-
 # -------------------------
 # Main Solara page
 # -------------------------
@@ -259,8 +196,10 @@ def Page():
     ))
     raster_dir, set_raster_dir = solara.use_state(default_tiles_dir)
     debounced_raster_dir = use_debounce(raster_dir, delay_ms=350)
-
     raster_opacity, set_raster_opacity = solara.use_state(float(getattr(CFG, "raster_opacity_default", 0.75)))
+
+    active_product, set_active_product = solara.use_state(PRODUCT_TREE_HEALTH)
+    pending_fit_product = solara.use_ref(PRODUCT_TREE_HEALTH)
 
     # Derived
     tile_ext, set_tile_ext = solara.use_state("png")
@@ -277,20 +216,17 @@ def Page():
         index_by_year.get(int(getattr(CFG, "center_pivot_default_year", years[-1])), 0)
     )
     cp_opacity, set_cp_opacity = solara.use_state(0.6)
-
     cp_use_http, set_cp_use_http = solara.use_state(True)
     cp_clip_roi_enabled, set_cp_clip_roi_enabled = solara.use_state(True)
 
     cp_layer, set_cp_layer = solara.use_state(None)
 
     # --- Date Palms (Qassim) state ---
+    dp_opacity, set_dp_opacity = solara.use_state(0.55)  # slightly higher default
     dp_layer, set_dp_layer = solara.use_state(None)
-    dp_opacity = float(getattr(CFG, "datepalms_default_opacity", 0.55))
 
     # --- Tree Health state ---
     th_layer, set_th_layer = solara.use_state(None)
-
-    active_product, set_active_product = solara.use_state("tree_health")
 
     # Map & base layers
     m = solara.use_memo(lambda: create_base_map(CFG.map_center, CFG.map_zoom, CFG.map_width, CFG.map_height), [])
@@ -303,25 +239,18 @@ def Page():
         if map_debug_attached.current:
             return
 
-        def _on_center_change(_=None):
-            try:
-                print(f"[DEBUG map] center changed -> {m.center}")
-            except Exception as e:
-                print(f"[DEBUG map] center change log failed: {e}")
+        def _on_center(change):
+            print(f"[MAP center] {change.old} -> {change.new}")
 
-        def _on_zoom_change(_=None):
-            try:
-                print(f"[DEBUG map] zoom changed -> {m.zoom}")
-            except Exception as e:
-                print(f"[DEBUG map] zoom change log failed: {e}")
+        def _on_zoom(change):
+            print(f"[MAP zoom] {change.old} -> {change.new}")
 
         try:
-            m.observe(_on_center_change, names="center")
-            m.observe(_on_zoom_change, names="zoom")
+            m.observe(_on_center, names="center")
+            m.observe(_on_zoom, names="zoom")
             map_debug_attached.current = True
-            print("[DEBUG map] observers attached")
-        except Exception as e:
-            print(f"[DEBUG map] failed to attach observers: {e}")
+        except Exception:
+            pass
 
     solara.use_effect(_attach_map_debug, [])
 
@@ -330,6 +259,42 @@ def Page():
         ensure_base_layers(m, osm, esri)
         ensure_controls(m)  # adds LayersControl if missing
     solara.use_effect(_init_controls_effect, [])
+
+    def _attach_restore_view():
+        if getattr(m, "_pending_restore_observer", False):
+            return
+
+        def _center_observer(change):
+            pending = getattr(m, "_pending_center_restore", None)
+            if not pending:
+                return
+            if change.new is None:
+                return
+            if tuple(change.new) != tuple(pending):
+                setattr(m, "_pending_center_restore", None)
+                try:
+                    m.center = pending
+                except Exception:
+                    pass
+
+        def _zoom_observer(change):
+            pending_zoom = getattr(m, "_pending_zoom_restore", None)
+            if pending_zoom is None:
+                return
+            if change.new is None:
+                return
+            if change.new != pending_zoom:
+                setattr(m, "_pending_zoom_restore", None)
+                try:
+                    m.zoom = pending_zoom
+                except Exception:
+                    pass
+
+        m.observe(_center_observer, names="center")
+        m.observe(_zoom_observer, names="zoom")
+        m._pending_restore_observer = True
+
+    solara.use_effect(_attach_restore_view, [])
 
     # ---------- Helper: insert overlay after an anchor layer ----------
     def _insert_after(layer: ipyleaflet.Layer, anchor: ipyleaflet.Layer | None):
@@ -345,8 +310,69 @@ def Page():
             m.add_layer(layer)
     # -----------------------------------------------------------------
 
+    def _fit_bounds(bounds: list | tuple | None):
+        if not bounds:
+            return
+        padding = getattr(CFG, "fit_bounds_padding", (20, 20))
+        max_zoom = getattr(CFG, "fit_bounds_max_zoom", 16)
+        try:
+            try:
+                m.fit_bounds(bounds, padding=padding, max_zoom=max_zoom)
+            except TypeError:
+                m.fit_bounds(bounds)
+            except Exception as exc:
+                print(f"[DEBUG fit] failed to fit_bounds {bounds}: {exc}")
+                return
+            try:
+                if getattr(m, "zoom", None) is not None and max_zoom is not None and m.zoom > max_zoom:
+                    m.zoom = max_zoom
+            except Exception:
+                pass
+        except Exception as exc:
+            print(f"[DEBUG fit] failed to fit_bounds {bounds}: {exc}")
+        finally:
+            try:
+                if getattr(m, "zoom", None) is not None and max_zoom is not None and m.zoom > max_zoom:
+                    m.zoom = max_zoom
+            except Exception:
+                pass
+
+    def _request_fit(product: str):
+        pending_fit_product.current = product
+        refs.did_fit_ref.current = False
+        print(f"[DEBUG request_fit] product={product}")
+
+    def _maybe_fit_product(product: str, bounds):
+        print(f"[DEBUG fit request] pending={pending_fit_product.current} active={active_product} target={product} bounds_set={bounds is not None}")
+        if pending_fit_product.current != product:
+            return
+        if not bounds:
+            return
+        _fit_bounds(bounds)
+        pending_fit_product.current = None
+
+    def _clear_popups():
+        try:
+            for layer in list(m.layers):
+                if isinstance(layer, ipyleaflet.Popup):
+                    m.remove_layer(layer)
+        except Exception:
+            pass
+        for attr in ("_datepalms_highlight_layer", "_cpf_highlight_layer"):
+            try:
+                existing = getattr(m, attr, None)
+                if existing and (existing in m.layers):
+                    m.remove_layer(existing)
+                setattr(m, attr, None)
+            except Exception:
+                pass
+        refs.active_marker_ref.current = None
+        try:
+            clear_tree_health_highlight()
+        except Exception:
+            pass
+
     # React to tiles folder changes (used for ext, bounds, fit)
-    tiles_fit_done = solara.use_ref(False)
     def _on_tiles_folder_change():
         folder = Path(debounced_raster_dir).resolve()
         if not folder.exists():
@@ -362,57 +388,13 @@ def Page():
         set_zmax(_zmax)
         set_tile_bounds(bounds)
 
-        if bounds and not tiles_fit_done.current:
-            try:
-                print("_on_tiles_folder_change" + (f" bounds={bounds}" if bounds else ""))  # debug
-                m.fit_bounds(bounds, max_zoom=_zmax or getattr(CFG, "fit_bounds_max_zoom", 14))
-            except TypeError:
-                m.fit_bounds(bounds)
-            tiles_fit_done.current = True
+        _maybe_fit_product(PRODUCT_TREE_VEGE, bounds)
         if _zmin is not None and m.zoom < _zmin:
             m.zoom = _zmin
 
         show_toast(f"Tiles ready z∈[{_zmin},{_zmax}] • ext=.{ext}", "success")
 
     solara.use_effect(_on_tiles_folder_change, [debounced_raster_dir])
-
-    def _reset_active_marker_icon():
-        current = refs.active_marker_ref.current
-        if current:
-            try:
-                current.icon = ipyleaflet.AwesomeIcon(
-                    name=CFG.icon_name,
-                    marker_color=CFG.icon_color_default,
-                    icon_color=CFG.icon_icon_color,
-                )
-            except Exception:
-                pass
-            refs.active_marker_ref.current = None
-
-    def _remove_all_popups():
-        try:
-            for layer in list(m.layers):
-                if isinstance(layer, ipyleaflet.Popup):
-                    m.remove_layer(layer)
-        except Exception:
-            pass
-
-    def _clear_selection():
-        _reset_active_marker_icon()
-        _remove_all_popups()
-        clear_tree_health_highlight()
-
-    def _select_product(target: str):
-        _clear_selection()
-        if target == "sensors":
-            refs.did_fit_ref.current = False
-        if target != active_product:
-            set_active_product(target)
-            try:
-                print(f"[DEBUG select_product] fitting product={target}")
-                _fit_product(target)
-            except Exception as e:
-                print(f"[DEBUG select_product] fit failed for product={target}: {e}")
 
     # Raster overlay (single upsert)
     def _build_raster_layer():
@@ -436,11 +418,19 @@ def Page():
 
     raster_layer = solara.use_memo(_build_raster_layer, [debounced_raster_dir, tile_ext, raster_opacity, zmin, zmax])
 
-    def _manage_raster_layer():
+    def _render_raster_layer():
         if raster_layer is None:
             return
-        set_layer_visibility(m, raster_layer, active_product == "raster")
-    solara.use_effect(_manage_raster_layer, [m, raster_layer, active_product])
+        if active_product == PRODUCT_TREE_VEGE:
+            upsert_overlay_by_name(m, raster_layer, below_markers=True)
+            _maybe_fit_product(PRODUCT_TREE_VEGE, tile_bounds)
+        elif raster_layer in m.layers:
+            try:
+                m.remove_layer(raster_layer)
+            except Exception:
+                pass
+
+    solara.use_effect(_render_raster_layer, [m, raster_layer, active_product, tile_bounds])
     solara.use_effect(lambda: (raster_layer and set_layer_opacity(raster_layer, raster_opacity)),
                       [raster_layer, raster_opacity])
 
@@ -478,12 +468,7 @@ def Page():
 
     def _build_group():
         try:
-            group, bounds = load_icon_group_from_geojson(
-                Path(debounced_geojson),
-                m,
-                refs.active_marker_ref,
-                on_show_timeseries,
-            )
+            group, bounds = load_icon_group_from_geojson(Path(debounced_geojson), m, refs.active_marker_ref, on_show_timeseries)
             return group, bounds, None
         except Exception as e:
             return None, None, str(e)
@@ -494,34 +479,25 @@ def Page():
     def _sync_markers():
         if not icon_group:
             return
-        sensors_visible = (active_product == "sensors")
-        if sensors_visible:
-            remove_prior_groups(m, keep=icon_group, names_to_prune={CFG.layer_group_name, "Sensor markers", ""})
-            print(
-                "[DEBUG _sync_markers]",
-                "active_product=", active_product,
-                "sensors_visible=", sensors_visible,
-                "did_fit=", refs.did_fit_ref.current,
-                "has_bounds=", bool(bounds),
-            )
-            add_group_and_fit(
-                m, icon_group, bounds, refs.did_fit_ref,
-                max_zoom=getattr(CFG, "fit_bounds_max_zoom", 14),
-                padding=getattr(CFG, "fit_bounds_padding", (20, 20))
-            )
-            try:
-                if hasattr(icon_group, "z_index"):
-                    icon_group.z_index = 10_000
-            except Exception:
-                pass
-            if icon_group not in m.layers:
-                m.add_layer(icon_group)
-        else:
+        print(f"[SYNC MARKERS] active={active_product}")
+        if active_product != PRODUCT_SENSORS:
             if icon_group in m.layers:
                 try:
                     m.remove_layer(icon_group)
                 except Exception:
                     pass
+            return
+
+        if icon_group not in m.layers:
+            m.add_layer(icon_group)
+        _maybe_fit_product(PRODUCT_SENSORS, bounds)
+
+        try:
+            if hasattr(icon_group, "z_index"):
+                icon_group.z_index = 10_000
+        except Exception:
+            pass
+
     solara.use_effect(_sync_markers, [icon_group, bounds, active_product])
 
     # -------------------------
@@ -529,247 +505,205 @@ def Page():
     # -------------------------
     def _ensure_cp_layer():
         nonlocal cp_layer
-        if active_product != "cpf":
-            return
+        print(f"[CPF] active={active_product} cp_layer_set={cp_layer is not None}")
+        if cp_layer is None:
+            clip_bbox = tuple(getattr(CFG, "center_pivot_default_roi", (24.0, 40.0, 28.0, 45.0))) if cp_clip_roi_enabled else None
 
-        if cp_layer and (cp_layer in m.layers):
+            layer, err = build_center_pivot_layer(
+                year_index_map.get(cp_year_index, years[-1]),
+                visible=True,
+                use_http_url=bool(cp_use_http and (clip_bbox is None)),
+                clip_to_bbox=clip_bbox,
+                m=m,
+                active_marker_ref=refs.active_marker_ref,
+            )
+            if err:
+                show_toast(err, "error")
+                set_cp_layer(None)
+                return
+
             try:
-                m.remove_layer(cp_layer)
+                layer.style = {**(layer.style or {}), "fillOpacity": float(cp_opacity)}
             except Exception:
                 pass
 
-        clip_bbox = tuple(getattr(CFG, "center_pivot_default_roi", (24.0, 40.0, 28.0, 45.0))) if cp_clip_roi_enabled else None
+            set_cp_layer(layer)
 
-        layer, err = build_center_pivot_layer(
-            year_index_map.get(cp_year_index, years[-1]),
-            visible=True,
-            use_http_url=bool(cp_use_http and (clip_bbox is None)),
-            clip_to_bbox=clip_bbox,
-            m=m,
-            active_marker_ref=refs.active_marker_ref,
-        )
-        if err:
-            show_toast(err, "error")
-            set_cp_layer(None)
-            return
-
-        try:
-            layer.style = {**(layer.style or {}), "fillOpacity": float(cp_opacity)}
-        except Exception:
-            pass
-
-        set_cp_layer(layer)
-        # CPF goes after raster
-        _insert_after(layer, raster_layer)
-
-    solara.use_effect(_ensure_cp_layer, [active_product, cp_year_index, cp_opacity, cp_use_http, cp_clip_roi_enabled, raster_layer])
-
-    def _apply_cp_visibility():
         if cp_layer is None:
             return
-        if active_product != "cpf" and (cp_layer in m.layers):
-            try:
-                m.remove_layer(cp_layer)
-            except Exception:
-                pass
-    solara.use_effect(_apply_cp_visibility, [active_product, cp_layer])
+
+        if active_product == PRODUCT_CENTER_PIVOT:
+            if cp_layer not in m.layers:
+                _insert_after(cp_layer, raster_layer)
+            roi_bounds = _roi_to_bounds(getattr(CFG, "center_pivot_default_roi", None))
+            _maybe_fit_product(PRODUCT_CENTER_PIVOT, roi_bounds)
+        else:
+            if cp_layer in m.layers:
+                try:
+                    m.remove_layer(cp_layer)
+                except Exception:
+                    pass
+
+    solara.use_effect(
+        _ensure_cp_layer,
+        [active_product, cp_year_index, cp_opacity, cp_use_http, cp_clip_roi_enabled, raster_layer],
+    )
 
     # -------------------------
     # Date Palms (Qassim) build/attach helpers
     # -------------------------
     def _ensure_dp_layer():
         nonlocal dp_layer
-        if active_product != "datepalms":
-            return
+        print(f"[DATEPALM] active={active_product} dp_layer_set={dp_layer is not None}")
+        if dp_layer is None:
+            layer, err = build_datepalms_layer(visible=True, m=m, active_marker_ref=refs.active_marker_ref)
+            if err:
+                show_toast(err, "error")
+                set_dp_layer(None)
+                return
 
-        if dp_layer and (dp_layer in m.layers):
             try:
-                m.remove_layer(dp_layer)
+                style_now = dict(getattr(layer, "style", {}) or {})
+                style_now.setdefault("color", "#0B6E4F")
+                style_now.setdefault("weight", 2)
+                style_now.setdefault("fillColor", "#74C69D")
+                style_now["fillOpacity"] = float(dp_opacity)
+                layer.style = style_now
             except Exception:
                 pass
 
-        layer, err = build_datepalms_layer(visible=True, m=m, active_marker_ref=refs.active_marker_ref)
-        if err:
-            show_toast(err, "error")
-            set_dp_layer(None)
-            return
+            set_dp_layer(layer)
 
-        # Increase fillOpacity a bit so it's clearly visible above imagery/rasters
-        try:
-            style_now = dict(getattr(layer, "style", {}) or {})
-            style_now.setdefault("color", "#0B6E4F")
-            style_now.setdefault("weight", 2)
-            style_now.setdefault("fillColor", "#74C69D")
-            style_now["fillOpacity"] = float(dp_opacity)
-            layer.style = style_now
-        except Exception:
-            pass
-        
-        # Optionally fit to the Date-Palm extent the first time we add it
-        set_dp_layer(layer)
-        # Date Palms goes after CPF (and before sensors)
-        _insert_after(layer, cp_layer if cp_layer in m.layers else raster_layer)
-
-    solara.use_effect(_ensure_dp_layer, [active_product, cp_layer])
-
-    def _apply_dp_visibility():
         if dp_layer is None:
             return
-        if active_product != "datepalms" and (dp_layer in m.layers):
-            try:
-                m.remove_layer(dp_layer)
-            except Exception:
-                pass
-    solara.use_effect(_apply_dp_visibility, [active_product, dp_layer])
+
+        if active_product == PRODUCT_DATEPALM:
+            anchor = cp_layer if (cp_layer and cp_layer in m.layers) else raster_layer
+            if dp_layer not in m.layers:
+                _insert_after(dp_layer, anchor)
+            _maybe_fit_product(PRODUCT_DATEPALM, getattr(dp_layer, "_bounds", None))
+        else:
+            if dp_layer in m.layers:
+                try:
+                    m.remove_layer(dp_layer)
+                except Exception:
+                    pass
+
+    solara.use_effect(_ensure_dp_layer, [active_product, dp_opacity, cp_layer, raster_layer])
 
     # -------------------------
     # Tree Health points layer
     # -------------------------
     def _ensure_th_layer():
         nonlocal th_layer
-        if active_product != "tree_health":
+        print(f"[TREE HEALTH] active={active_product} th_layer_set={th_layer is not None}")
+        if th_layer is None:
+            layer, err = build_tree_health_layer(m=m, active_marker_ref=refs.active_marker_ref)
+            if err:
+                show_toast(err, "error")
+                set_th_layer(None)
+                return
+            set_th_layer(layer)
+
+        if th_layer is None:
             return
 
-        if th_layer and (th_layer in m.layers):
-            try:
-                m.remove_layer(th_layer)
-            except Exception:
-                pass
-
-        layer, err = build_tree_health_layer(
-            m=m,
-            active_marker_ref=refs.active_marker_ref,
-        )
-        if err:
-            show_toast(err, "error")
-            set_th_layer(None)
-            return
-
-        set_th_layer(layer)
-        anchor = None
-        if dp_layer and (dp_layer in m.layers):
-            anchor = dp_layer
-        elif cp_layer and (cp_layer in m.layers):
-            anchor = cp_layer
+        if active_product == PRODUCT_TREE_HEALTH:
+            anchor: ipyleaflet.Layer | None = None
+            if dp_layer and (dp_layer in m.layers):
+                anchor = dp_layer
+            elif cp_layer and (cp_layer in m.layers):
+                anchor = cp_layer
+            else:
+                anchor = raster_layer
+            if th_layer not in m.layers:
+                _insert_after(th_layer, anchor)
+            _maybe_fit_product(PRODUCT_TREE_HEALTH, getattr(th_layer, "_bounds", None))
         else:
-            anchor = raster_layer
-        _insert_after(layer, anchor)
+            if th_layer in m.layers:
+                try:
+                    m.remove_layer(th_layer)
+                except Exception:
+                    pass
+            clear_tree_health_highlight()
 
     solara.use_effect(_ensure_th_layer, [active_product, dp_layer, cp_layer, raster_layer])
 
-    def _apply_th_visibility():
-        if th_layer is None:
-            return
-        if active_product != "tree_health" and (th_layer in m.layers):
-            try:
-                m.remove_layer(th_layer)
-            except Exception:
-                pass
-    solara.use_effect(_apply_th_visibility, [active_product, th_layer])
-
-    def _fit_product(target: str):
-        bounds_to_fit = None
-        if target == "raster":
-            bounds_to_fit = tile_bounds
-        elif target == "datepalms" and dp_layer:
-            bounds_to_fit = getattr(dp_layer, "_bounds", None)
-        elif target == "tree_health" and th_layer:
-            bounds_to_fit = getattr(th_layer, "_bounds", None)
-        elif target == "cpf" and cp_layer:
-            bounds_to_fit = getattr(cp_layer, "_bounds", None)
-        elif target == "sensors":
-            bounds_to_fit = bounds
-
-        if not bounds_to_fit:
-            return
-        target_zoom = getattr(CFG, "product_fit_max_zoom", getattr(CFG, "fit_bounds_max_zoom", 14))
-        if target == "tree_health":
-            target_zoom = getattr(CFG, "tree_health_fit_max_zoom", target_zoom)
-        try:
-            print("_fit_product:", target, "bounds?", bool(bounds_to_fit), "zoom", target_zoom)
-            m.fit_bounds(bounds_to_fit, max_zoom=target_zoom)
-        except TypeError:
-            m.fit_bounds(bounds_to_fit)
     # -------------------------
     # Keep sensors on top whenever either overlay (CPF/DP) changes
     # -------------------------
     def _float_sensors_top():
-        if active_product != "sensors":
+        if active_product != PRODUCT_SENSORS:
             return
         if icon_group and (icon_group in m.layers):
-            # remove & re-add to top
             try:
                 m.remove_layer(icon_group)
             except Exception:
                 pass
             m.add_layer(icon_group)
+
     solara.use_effect(_float_sensors_top, [icon_group, cp_layer, dp_layer, th_layer, active_product])
 
-    # -------------------------
-    # UI
-    # -------------------------
+    def _select_product(product: str):
+        if product == active_product:
+            return
+        _clear_popups()
+        _request_fit(product)
+        set_active_product(product)
+
+    def _product_button_style(product: str):
+        active = product == active_product
+        base = {
+            "borderRadius": "999px",
+            "padding": "0.45rem 1.1rem",
+            "minWidth": "180px",
+            "fontWeight": "600",
+            "fontSize": "0.95rem",
+            "transition": "background 0.2s ease",
+            "cursor": "pointer",
+            "margin": "0",
+        }
+        if active:
+            base.update({
+                "background": "#0f766e",
+                "color": "#f8fafc",
+                "border": "1px solid #0f766e",
+            })
+        else:
+            base.update({
+                "background": "transparent",
+                "color": "#0f172a",
+                "border": "1px solid #cbd5f5",
+            })
+        return base
+
     with solara.Column(gap="0.75rem"):
         solara.Markdown("### 🌴 Geoportal for Date Palm Field Informatics")
 
-        with solara.Card("", style={"padding": "12px"}):
-            solara.Markdown("**Products**", style={"fontSize": "1.2rem"})
-            def _product_button_style(key: str):
-                style = {"textAlign": "left", "fontWeight": "600"}
-                if active_product == key:
-                    style.update({
-                        "background": "#0f766e",
-                        "color": "#fff",
-                        "border": "1px solid #0f766e",
-                        "boxShadow": "0 3px 6px rgba(15,118,110,0.25)",
-                    })
-                return style
+        with solara.Card("", style={"padding": "16px"}):
+            solara.Markdown("**Products**")
+            solara.Markdown(
+                "Tap a title to load the dataset and center the map on the target region.",
+                style={"margin": "0 0 0.75rem 0", "color": "#475569", "fontSize": "0.9rem"},
+            )
             with solara.Row(
                 gap="0.5rem",
                 style={
                     "flexWrap": "wrap",
+                    "alignItems": "stretch",
                 },
             ):
-                for key, label in PRODUCTS:
+                for product in PRODUCT_ORDER:
                     solara.Button(
-                        label,
-                        button_style="primary" if active_product == key else "secondary",
-                        layout=W.Layout(min_width="210px", flex="1 1 200px"),
-                        style=_product_button_style(key),
-                        on_click=lambda *_args, target=key: _select_product(target),
+                        PRODUCT_LABELS.get(product, product),
+                        text=True,
+                        on_click=lambda event=None, product=product: _select_product(product),
+                        style=_product_button_style(product),
                     )
             solara.Markdown(
-                f"Currently showing: **{dict(PRODUCTS).get(active_product)}**",
-                style={"marginTop": "0.5rem", "fontSize": "0.95rem", "color": "#444"},
+                f"**Active product:** {PRODUCT_LABELS.get(active_product, active_product)}",
+                style={"marginTop": "0.75rem"},
             )
-            legend_widget = _product_legend(active_product)
-            if legend_widget:
-                legend_widget
-            summary_widget = _product_summary(active_product)
-            if summary_widget:
-                summary_widget
-
-        if active_product == "cpf":
-            with solara.Card("", style={"padding": "12px"}):
-                solara.Markdown("**Center-Pivot Fields (CPF)**", style={"margin": "0", "fontSize": "1rem"})
-                with solara.Row(
-                    gap="0.75rem",
-                    style={
-                        "alignItems": "center",
-                        "flexWrap": "wrap",
-                    },
-                ):
-                    with solara.Div(style={"width": "240px"}):
-                        solara.SliderInt(
-                            label=f"Year: {year_index_map.get(cp_year_index)}",
-                            value=cp_year_index, min=0, max=len(years) - 1, step=1,
-                            on_value=set_cp_year_index,
-                        )
-                    with solara.Div(style={"width": "220px"}):
-                        solara.SliderFloat(
-                            label="Opacity",
-                            value=cp_opacity, min=0.1, max=1.0, step=0.05,
-                            on_value=set_cp_opacity,
-                        )
 
         solara.display(m)
         ## turn off if not showing the time sereis at the map window bottom

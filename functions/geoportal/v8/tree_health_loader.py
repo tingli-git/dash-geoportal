@@ -96,13 +96,11 @@ def _collect_markers(
             fill_opacity=fill_opacity,
             opacity=0.95,
         )
-        marker._tree_health_default_color = color
 
         def _make_click_handler(lat_val, lon_val, props_snapshot, marker_ref):
             def _handler(**_):
                 if m is None:
                     return
-                _highlight_marker(marker_ref)
                 show_popup(
                     m,
                     lat_val,
@@ -118,33 +116,6 @@ def _collect_markers(
         locations.append(point)
 
     return layers, locations
-
-
-_highlight_ref = SimpleNamespace(marker=None)
-
-
-def _restore_marker(marker: ipyleaflet.CircleMarker):
-    default = getattr(marker, "_tree_health_default_color", None)
-    if default:
-        marker.fill_color = default
-        marker.color = default
-
-
-def _highlight_marker(marker: ipyleaflet.CircleMarker):
-    prev = getattr(_highlight_ref, "marker", None)
-    if prev and prev is not marker:
-        _restore_marker(prev)
-    _highlight_ref.marker = marker
-    highlight_color = getattr(CFG, "tree_health_active_color", "#FFD166")
-    marker.fill_color = highlight_color
-    marker.color = highlight_color
-
-
-def clear_tree_health_highlight():
-    prev = getattr(_highlight_ref, "marker", None)
-    if prev:
-        _restore_marker(prev)
-        _highlight_ref.marker = None
 
 
 def build_tree_health_layer(
@@ -173,3 +144,30 @@ def build_tree_health_layer(
     bounds = padded_bounds(locations)
     setattr(layer, "_bounds", bounds)
     return layer, None
+
+
+_highlight_ref = SimpleNamespace(marker=None)
+
+
+def _restore_marker(marker: ipyleaflet.CircleMarker):
+    default = getattr(marker, "_tree_health_default_color", None)
+    if default:
+        marker.fill_color = default
+        marker.color = default
+
+
+def _highlight_marker(marker: ipyleaflet.CircleMarker):
+    prev = getattr(_highlight_ref, "marker", None)
+    if prev and prev is not marker:
+        _restore_marker(prev)
+    _highlight_ref.marker = marker
+    highlight_color = getattr(CFG, "tree_health_active_color", "#FFD166")
+    marker.fill_color = highlight_color
+    marker.color = highlight_color
+
+
+def clear_tree_health_highlight():
+    prev = getattr(_highlight_ref, "marker", None)
+    if prev:
+        _restore_marker(prev)
+        _highlight_ref.marker = None

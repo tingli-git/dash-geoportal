@@ -2,8 +2,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import ipyleaflet
-from typing import Callable
-
 from functions.geoportal.v8.utils import padded_bounds
 from functions.geoportal.v8.config import CFG
 from functions.geoportal.v8.popups import show_popup
@@ -13,7 +11,6 @@ def load_icon_group_from_geojson(
     m: ipyleaflet.Map,
     active_marker_ref,
     on_show_timeseries=None,      # <-- NEW (optional)
-    on_marker_click: Callable[[dict], None] | None = None,
 ):
     if not path or not path.exists():
         raise FileNotFoundError(f"GeoJSON file not found: {path}")
@@ -38,16 +35,26 @@ def load_icon_group_from_geojson(
 
         coords_latlon.append((lat, lon))
         marker = ipyleaflet.Marker(location=(lat, lon), icon=base_icon)
+        try:
+            marker.pan_on_click = False
+        except Exception:
+            pass
 
         # capture defaults to avoid late-binding
-        def _handle_click(*_, event=None, lat=lat, lon=lon, props=props, marker=marker, **__):
-            if on_marker_click:
-                try:
-                    on_marker_click(props)
-                except Exception:
-                    pass
-            show_popup(m, lat, lon, props, marker, active_marker_ref, on_show_timeseries)
-        marker.on_click(_handle_click)
+        marker.on_click(
+            lambda props=props, lat=lat, lon=lon, mk=marker, **_:
+                show_popup(
+                    m,
+                    lat,
+                    lon,
+                    props,
+                    mk,
+                    active_marker_ref,
+                    on_show_timeseries,
+                    min_width=1800,
+                    max_width=3000,
+                )
+        )
         group.add_layer(marker)
 
     bounds = padded_bounds(coords_latlon) if coords_latlon else None

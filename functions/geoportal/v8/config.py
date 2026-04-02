@@ -10,7 +10,7 @@ class Config:
     top_dir: Path = Path("/datawaha/esom/DatePalmCounting/Geoportal")
     default_geojson: Path = Path("/datawaha/esom/DatePalmCounting/Geoportal/Sensors/SensorInfos/AldakaSensors.geojson")
     map_center: tuple[float, float] = (29.0, 40.0)
-    map_zoom: int = 5
+    map_zoom: int = 16
     map_height: str = "90vh"
     map_width: str = "100%"
 
@@ -22,7 +22,7 @@ class Config:
 
     # Layers & fit options
     layer_group_name: str = "Sensors in AlDka"
-    fit_bounds_max_zoom: int = 14
+    fit_bounds_max_zoom: int = 16
     fit_bounds_padding: tuple[int, int] = (20, 20)
 
     # --- Timeseries CSVs ---
@@ -129,10 +129,6 @@ class Config:
     tree_health_color_healthy: str = "#66C2A5"
     tree_health_color_infested: str = "#D1495B"
     tree_health_color_default: str = "#8C8C8C"
-    tree_health_total_count: int = 664
-    tree_health_healthy_count: int = 650
-    tree_health_infested_count: int = 14
-    tree_health_active_color: str = "#FFD166"
 
     # --- Date Palm Fields (Qassim) — single GeoJSON file ---
     datepalms_geojson_file: Path = Path(
@@ -142,9 +138,6 @@ class Config:
     datepalms_http_url: str = "http://127.0.0.1:8766/datepalms/Qassim_datepalm_fields_polygons.geojson"
     datepalms_layer_name: str = "Date Palm Fields"
     datepalms_enabled: bool = True
-    datepalms_default_opacity: float = 0.55
-    tree_health_fit_max_zoom: int = 19
-    product_fit_max_zoom: int = 17
 
 
 CFG = Config()
