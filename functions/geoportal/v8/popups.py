@@ -111,6 +111,15 @@ def show_popup(
         max_width=max_width or 3000,
     )
 
+    offset_ratio = getattr(CFG, "popup_offset_ratio", 0.0) or 0.0
+    offset_pct = int(round(offset_ratio * 100))
+    if offset_pct:
+        try:
+            popup.layout.transform = f"translateY(-{offset_pct}vh)"
+            popup.layout.margin = f"0 0 {offset_pct}vh 0"
+        except Exception:
+            pass
+
     m.add_layer(popup)
 
     print(f"[POPUP] showing {props.get('sensor_id') or props.get('name') or 'sensor'}")

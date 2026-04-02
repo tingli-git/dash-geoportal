@@ -83,6 +83,11 @@ PRODUCT_LABELS = {
     PRODUCT_CENTER_PIVOT: "Center-Pivot Fields",
 }
 
+PRODUCT_DEFAULT_ZOOM = {
+    PRODUCT_TREE_HEALTH: 16,
+    PRODUCT_SENSORS: 16,
+}
+
 
 # -------------------------
 # filesystem tile introspection (for UI & fitBounds)
@@ -155,7 +160,10 @@ def _legend_inline_row():
     row_children = []
     if title:
         row_children.append(
-            solara.Markdown(f"**{title}:**", style={"marginRight": "8px", "whiteSpace": "nowrap"})
+            solara.Markdown(
+                f"**{title}:**",
+                style={"marginRight": "8px", "whiteSpace": "nowrap", "fontSize": "0.95rem"},
+            )
         )
 
     for it in items:
@@ -169,10 +177,102 @@ def _legend_inline_row():
                 "marginRight": "4px",
             }
         )
-        label = solara.Markdown(f"{it['name']}", style={"marginRight": "12px", "whiteSpace": "nowrap"})
+        label = solara.Markdown(
+            f"{it['name']}",
+            style={"margin": "0", "fontSize": "0.9rem", "whiteSpace": "nowrap", "marginRight": "10px"},
+        )
         row_children.extend([color_box, label])
 
-    return solara.Row(children=row_children, gap="4px", style={"alignItems": "center"})
+    return solara.Row(
+        children=row_children,
+        gap="6px",
+        style={"alignItems": "center", "flexWrap": "nowrap"},
+    )
+
+
+def _tree_health_badges():
+    healthy_color = getattr(CFG, "tree_health_color_healthy", "#66C2A5")
+    infested_color = getattr(CFG, "tree_health_color_infested", "#D1495B")
+    healthy_count = getattr(CFG, "tree_health_healthy_count", None)
+    infested_count = getattr(CFG, "tree_health_infested_count", None)
+
+    def badge(color: str):
+        return solara.Div(
+            style={
+                "width": "16px",
+                "height": "16px",
+                "borderRadius": "50%",
+                "background": color,
+                "border": "1px solid rgba(0,0,0,0.25)",
+            }
+        )
+
+    return solara.Row(
+        children=[
+            badge(healthy_color),
+            solara.Markdown(
+                f"Healthy{f' ({healthy_count})' if healthy_count is not None else ''}",
+                style={"margin": "0", "fontSize": "0.9rem"},
+            ),
+            badge(infested_color),
+            solara.Markdown(
+                f"Infested{f' ({infested_count})' if infested_count is not None else ''}",
+                style={"margin": "0", "fontSize": "0.9rem"},
+            ),
+        ],
+        gap="0.35rem",
+        style={"alignItems": "center", "marginTop": "0.6rem"},
+    )
+
+
+def _product_legend(product: str):
+    if product == PRODUCT_TREE_VEGE:
+        return _legend_inline_row()
+    if product == PRODUCT_TREE_HEALTH:
+        return _tree_health_badges()
+    if product == PRODUCT_DATEPALM:
+        return solara.Markdown(
+            "Date Palm Fields — filled polygons representing Qassim farms, clipped to the current ROI.",
+            style={"fontSize": "0.9rem", "color": "#444", "marginTop": "0.5rem"},
+        )
+    if product == PRODUCT_CENTER_PIVOT:
+        return solara.Markdown(
+            "Center-Pivot Fields — yearly polygons rendered from the CPF archive.",
+            style={"fontSize": "0.9rem", "color": "#444", "marginTop": "0.5rem"},
+        )
+    if product == PRODUCT_SENSORS:
+        icon_color = getattr(CFG, "icon_color_default", "blue")
+        return solara.Row(
+            children=[
+                solara.Div(
+                    style={
+                        "width": "14px",
+                        "height": "14px",
+                        "borderRadius": "50%",
+                        "background": icon_color,
+                        "border": "1px solid rgba(0,0,0,0.25)",
+                    }
+                ),
+                solara.Markdown(
+                    "Sensors in AlDka — sensor icon colors follow the configured mapping.",
+                    style={"margin": "0", "fontSize": "0.9rem"},
+                ),
+            ],
+            gap="0.35rem",
+            style={"alignItems": "center", "marginTop": "0.5rem"},
+        )
+    return solara.Div()
+
+
+def _product_summary(product: str):
+    if product == PRODUCT_TREE_HEALTH:
+        total = getattr(CFG, "tree_health_total_count", None)
+        if total is not None:
+            return solara.Markdown(
+                f"Total number of trees: {total}",
+                style={"marginTop": "0.5rem", "fontSize": "0.95rem", "color": "#222"},
+            )
+    return solara.Div()
 
 
 # -------------------------
@@ -197,6 +297,7 @@ def Page():
     raster_dir, set_raster_dir = solara.use_state(default_tiles_dir)
     debounced_raster_dir = use_debounce(raster_dir, delay_ms=350)
     raster_opacity, set_raster_opacity = solara.use_state(float(getattr(CFG, "raster_opacity_default", 0.75)))
+    sensor_opacity, set_sensor_opacity = solara.use_state(float(getattr(CFG, "sensor_opacity_default", 1.0)))
 
     active_product, set_active_product = solara.use_state(PRODUCT_TREE_HEALTH)
     pending_fit_product = solara.use_ref(PRODUCT_TREE_HEALTH)
@@ -222,10 +323,11 @@ def Page():
     cp_layer, set_cp_layer = solara.use_state(None)
 
     # --- Date Palms (Qassim) state ---
-    dp_opacity, set_dp_opacity = solara.use_state(0.55)  # slightly higher default
+    dp_opacity, set_dp_opacity = solara.use_state(float(getattr(CFG, "datepalms_default_opacity", 0.55)))
     dp_layer, set_dp_layer = solara.use_state(None)
 
     # --- Tree Health state ---
+    th_opacity, set_th_opacity = solara.use_state(float(getattr(CFG, "tree_health_fill_opacity", 0.75)))
     th_layer, set_th_layer = solara.use_state(None)
 
     # Map & base layers
@@ -253,6 +355,18 @@ def Page():
             pass
 
     solara.use_effect(_attach_map_debug, [])
+
+    def _apply_product_zoom(product: str):
+        target = PRODUCT_DEFAULT_ZOOM.get(product)
+        if target is None:
+            return
+        try:
+            if getattr(m, "zoom", None) is not None and m.zoom != target:
+                m.zoom = target
+        except Exception:
+            pass
+
+    solara.use_effect(lambda: _apply_product_zoom(active_product), [active_product])
 
     # ensure controls WITHOUT returning a tuple (keeps LayersControl alive)
     def _init_controls_effect():
@@ -371,6 +485,143 @@ def Page():
             clear_tree_health_highlight()
         except Exception:
             pass
+
+    def _refresh_cp_layer():
+        nonlocal cp_layer
+        if cp_layer and (cp_layer in m.layers):
+            try:
+                m.remove_layer(cp_layer)
+            except Exception:
+                pass
+        cp_layer = None
+        set_cp_layer(None)
+
+    def _slider_float(label, value, setter, min_val, max_val, step, width="240px"):
+        return solara.Div(
+            style={"width": width},
+            children=[
+                solara.SliderFloat(
+                    label=label,
+                    value=value,
+                    min=min_val,
+                    max=max_val,
+                    step=step,
+                    on_value=setter,
+                )
+            ]
+        )
+
+    def _on_cp_year_change(value):
+        _refresh_cp_layer()
+        set_cp_year_index(value)
+
+    def _render_cp_year_buttons():
+        buttons = []
+        for year in years:
+            is_active = year_index_map.get(cp_year_index) == year
+            btn_style = {
+                "minWidth": "62px",
+                "padding": "0.35rem 0.65rem",
+                "borderRadius": "6px",
+                "border": "1px solid #cbd5f5",
+                "background": "#0f766e" if is_active else "#f1f5f9",
+                "color": "#fff" if is_active else "#0f172a",
+                "fontWeight": "600" if is_active else "500",
+            }
+            buttons.append(
+                solara.Button(
+                    str(year),
+                    text=True,
+                    style=btn_style,
+                    on_click=lambda _event=None, target=year: (_on_cp_year_change(index_by_year.get(target, 0))),
+                )
+            )
+        return solara.Row(
+            children=buttons,
+            gap="0.35rem",
+            style={
+                "flexWrap": "nowrap",
+                "alignItems": "center",
+                "overflowX": "auto",
+                "paddingBottom": "4px",
+            },
+        )
+
+    def _product_controls(product: str):
+        base_style = {"alignItems": "center", "gap": "0.75rem", "flexWrap": "nowrap"}
+        if product == PRODUCT_TREE_VEGE:
+            return solara.Row(
+                gap="0.5rem",
+                style=base_style,
+                children=[
+                    solara.Div(
+                        style={"width": "260px"},
+                        children=[
+                            _slider_float("Opacity", raster_opacity, set_raster_opacity, 0.0, 1.0, 0.01)
+                        ],
+                    )
+                ],
+            )
+        if product == PRODUCT_DATEPALM:
+            return solara.Row(
+                gap="0.5rem",
+                style=base_style,
+                children=[
+                    solara.Div(
+                        style={"width": "260px"},
+                        children=[
+                            _slider_float("Opacity", dp_opacity, set_dp_opacity, 0.1, 1.0, 0.05)
+                        ],
+                    )
+                ],
+            )
+        if product == PRODUCT_TREE_HEALTH:
+            return solara.Row(
+                gap="0.5rem",
+                style=base_style,
+                children=[
+                    solara.Div(
+                        style={"width": "260px"},
+                        children=[
+                            _slider_float("Opacity", th_opacity, set_th_opacity, 0.1, 1.0, 0.05)
+                        ],
+                    )
+                ],
+            )
+        if product == PRODUCT_SENSORS:
+            return solara.Row(
+                gap="0.5rem",
+                style=base_style,
+                children=[
+                    solara.Div(
+                        style={"width": "260px"},
+                        children=[
+                            _slider_float("Opacity", sensor_opacity, set_sensor_opacity, 0.1, 1.0, 0.05)
+                        ],
+                    )
+                ],
+            )
+        if product == PRODUCT_CENTER_PIVOT:
+            return solara.Row(
+                gap="0.75rem",
+                style=base_style,
+                children=[
+                    solara.Div(
+                        style={"width": "220px"},
+                        children=[
+                            solara.Markdown("Year"),
+                            _render_cp_year_buttons(),
+                        ],
+                    ),
+                    solara.Div(
+                        style={"width": "220px"},
+                        children=[
+                            _slider_float("Opacity", cp_opacity, set_cp_opacity, 0.1, 1.0, 0.05, width="220px"),
+                        ],
+                    ),
+                ],
+            )
+        return solara.Div()
 
     # React to tiles folder changes (used for ext, bounds, fit)
     def _on_tiles_folder_change():
@@ -500,12 +751,34 @@ def Page():
 
     solara.use_effect(_sync_markers, [icon_group, bounds, active_product])
 
+    def _apply_sensor_opacity():
+        if not icon_group:
+            return
+        for marker in getattr(icon_group, "layers", []):
+            try:
+                if sensor_opacity is not None:
+                    marker.opacity = float(sensor_opacity)
+            except Exception:
+                pass
+
+    solara.use_effect(_apply_sensor_opacity, [icon_group, sensor_opacity])
+
     # -------------------------
     # Center-Pivot build/attach helpers
     # -------------------------
     def _ensure_cp_layer():
         nonlocal cp_layer
         print(f"[CPF] active={active_product} cp_layer_set={cp_layer is not None}")
+        target_year = year_index_map.get(cp_year_index)
+        existing_year = getattr(cp_layer, "_year", None)
+        if cp_layer is not None and existing_year != target_year:
+            if cp_layer in m.layers:
+                try:
+                    m.remove_layer(cp_layer)
+                except Exception:
+                    pass
+            cp_layer = None
+            set_cp_layer(None)
         if cp_layer is None:
             clip_bbox = tuple(getattr(CFG, "center_pivot_default_roi", (24.0, 40.0, 28.0, 45.0))) if cp_clip_roi_enabled else None
 
@@ -527,7 +800,9 @@ def Page():
             except Exception:
                 pass
 
+            cp_layer = layer
             set_cp_layer(layer)
+            setattr(layer, "_year", target_year)
 
         if cp_layer is None:
             return
@@ -598,7 +873,7 @@ def Page():
         nonlocal th_layer
         print(f"[TREE HEALTH] active={active_product} th_layer_set={th_layer is not None}")
         if th_layer is None:
-            layer, err = build_tree_health_layer(m=m, active_marker_ref=refs.active_marker_ref)
+            layer, err = build_tree_health_layer(m=m, active_marker_ref=refs.active_marker_ref, fill_opacity=th_opacity)
             if err:
                 show_toast(err, "error")
                 set_th_layer(None)
@@ -607,6 +882,13 @@ def Page():
 
         if th_layer is None:
             return
+
+        for marker in getattr(th_layer, "layers", []):
+            try:
+                marker.fill_opacity = float(th_opacity)
+                marker.opacity = float(th_opacity)
+            except Exception:
+                pass
 
         if active_product == PRODUCT_TREE_HEALTH:
             anchor: ipyleaflet.Layer | None = None
@@ -627,7 +909,7 @@ def Page():
                     pass
             clear_tree_health_highlight()
 
-    solara.use_effect(_ensure_th_layer, [active_product, dp_layer, cp_layer, raster_layer])
+    solara.use_effect(_ensure_th_layer, [active_product, dp_layer, cp_layer, raster_layer, th_opacity])
 
     # -------------------------
     # Keep sensors on top whenever either overlay (CPF/DP) changes
@@ -681,11 +963,7 @@ def Page():
         solara.Markdown("### 🌴 Geoportal for Date Palm Field Informatics")
 
         with solara.Card("", style={"padding": "16px"}):
-            solara.Markdown("**Products**")
-            solara.Markdown(
-                "Tap a title to load the dataset and center the map on the target region.",
-                style={"margin": "0 0 0.75rem 0", "color": "#475569", "fontSize": "0.9rem"},
-            )
+            solara.Markdown("**Products**", style={"fontSize": "1.15rem"})
             with solara.Row(
                 gap="0.5rem",
                 style={
@@ -704,6 +982,30 @@ def Page():
                 f"**Active product:** {PRODUCT_LABELS.get(active_product, active_product)}",
                 style={"marginTop": "0.75rem"},
             )
+            legend_widget = _product_legend(active_product)
+            controls_widget = _product_controls(active_product)
+            if legend_widget or controls_widget:
+                with solara.Row(
+                    gap="1rem",
+                    style={
+                        "alignItems": "flex-start",
+                        "flexWrap": "wrap",
+                        "marginTop": "0.75rem",
+                    },
+                ):
+                    if legend_widget:
+                        solara.Div(
+                            style={"flex": "1 1 240px", "minWidth": "240px"},
+                            children=[legend_widget],
+                        )
+                    if controls_widget:
+                        solara.Div(
+                            style={"flex": "0 0 auto"},
+                            children=[controls_widget],
+                        )
+            summary_widget = _product_summary(active_product)
+            if summary_widget:
+                summary_widget
 
         solara.display(m)
         ## turn off if not showing the time sereis at the map window bottom

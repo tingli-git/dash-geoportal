@@ -43,6 +43,7 @@ class Config:
     raster_layer_name: str = "Tree-Vege-NonVege Classification"
     raster_opacity_default: float = 0.75
     raster_max_zoom: int = 14  # 10 m → ~14 native; 15 looks smoother (oversample)
+    datepalms_default_opacity: float = 0.55
 
     # Manual external tiles server
     tiles_http_base: str = "http://127.0.0.1:8766/38RLQ_2024"
@@ -129,6 +130,11 @@ class Config:
     tree_health_color_healthy: str = "#66C2A5"
     tree_health_color_infested: str = "#D1495B"
     tree_health_color_default: str = "#8C8C8C"
+    tree_health_active_color: str = "#F97316"
+    tree_health_healthy_count: int | None = 650
+    tree_health_infested_count: int | None = 14
+    tree_health_total_count: int | None = 664
+    popup_offset_ratio: float = 0.1
 
     # --- Date Palm Fields (Qassim) — single GeoJSON file ---
     datepalms_geojson_file: Path = Path(
@@ -138,6 +144,7 @@ class Config:
     datepalms_http_url: str = "http://127.0.0.1:8766/datepalms/Qassim_datepalm_fields_polygons.geojson"
     datepalms_layer_name: str = "Date Palm Fields"
     datepalms_enabled: bool = True
+    sensor_opacity_default: float = 1.0
 
 
 CFG = Config()

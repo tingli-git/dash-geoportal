@@ -66,6 +66,9 @@ def _collect_markers(
     features: Iterable[Dict[str, Any]],
     m: ipyleaflet.Map | None,
     active_marker_ref,
+    *,
+    fill_opacity_override: float | None = None,
+    marker_opacity: float | None = None,
 ) -> Tuple[List[ipyleaflet.CircleMarker], List[Tuple[float, float]]]:
     layers: List[ipyleaflet.CircleMarker] = []
     locations: List[Tuple[float, float]] = []
@@ -74,7 +77,9 @@ def _collect_markers(
         radius = int(round(float(radius_val)))
     except Exception:
         radius = 6
-    fill_opacity = float(getattr(CFG, "tree_health_fill_opacity", 0.75))
+    default_fill = float(getattr(CFG, "tree_health_fill_opacity", 0.75))
+    fill_opacity = float(fill_opacity_override) if (fill_opacity_override is not None) else default_fill
+    marker_opacity = float(marker_opacity) if (marker_opacity is not None) else fill_opacity
     weight_val = getattr(CFG, "tree_health_stroke_weight", 1.5)
     try:
         weight = int(round(float(weight_val)))
@@ -94,13 +99,14 @@ def _collect_markers(
             fill_color=color,
             weight=weight,
             fill_opacity=fill_opacity,
-            opacity=0.95,
+            opacity=marker_opacity,
         )
 
         def _make_click_handler(lat_val, lon_val, props_snapshot, marker_ref):
             def _handler(**_):
                 if m is None:
                     return
+                _highlight_marker(marker_ref)
                 show_popup(
                     m,
                     lat_val,
@@ -122,6 +128,7 @@ def build_tree_health_layer(
     *,
     m: ipyleaflet.Map | None = None,
     active_marker_ref=None,
+    fill_opacity: float | None = None,
 ) -> Tuple[ipyleaflet.LayerGroup | None, str | None]:
     name = getattr(CFG, "tree_health_layer_name", "Tree Health")
     geojson_path = Path(getattr(CFG, "tree_health_geojson_file", ""))
@@ -136,7 +143,13 @@ def build_tree_health_layer(
         return None, f"Failed to read Tree Health GeoJSON: {exc}"
 
     features = list(gj.get("features", []) or [])
-    layers, locations = _collect_markers(features, m, active_marker_ref)
+    layers, locations = _collect_markers(
+        features,
+        m,
+        active_marker_ref,
+        fill_opacity_override=fill_opacity,
+        marker_opacity=fill_opacity,
+    )
     if not layers:
         return None, "Tree Health GeoJSON contains no valid point features."
 
@@ -161,7 +174,7 @@ def _highlight_marker(marker: ipyleaflet.CircleMarker):
     if prev and prev is not marker:
         _restore_marker(prev)
     _highlight_ref.marker = marker
-    highlight_color = getattr(CFG, "tree_health_active_color", "#FFD166")
+    highlight_color = getattr(CFG, "tree_health_active_color", "#F97316")
     marker.fill_color = highlight_color
     marker.color = highlight_color
 
