@@ -1,4 +1,4 @@
-# functions/geoportal/v7/tree_health_loader.py
+# functions/geoportal/v9/tree_health_loader.py
 from __future__ import annotations
 
 import json
@@ -8,9 +8,9 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import ipyleaflet
 
-from functions.geoportal.v8.config import CFG
-from functions.geoportal.v8.popups import show_popup
-from functions.geoportal.v8.utils import padded_bounds
+from functions.geoportal.v9.config import CFG
+from functions.geoportal.v9.popups import show_popup
+from functions.geoportal.v9.utils import padded_bounds
 
 
 def _read_geojson(path: Path) -> Dict[str, Any]:
