@@ -327,7 +327,7 @@ def build_datepalms_layer(
     - Adds click popup & a highlight overlay
     - NDVI time series is shown via a separate button in the popup.
     """
-    name = getattr(CFG, "datepalms_layer_name", "Date Palm Fields (Qassim)")
+    name = getattr(CFG, "datepalms_layer_name", "Date Palm Fields Qassim Manual (Qassim)")
     url = getattr(CFG, "datepalms_http_url", None)
     if not url:
         return None, "CFG.datepalms_http_url is not set."

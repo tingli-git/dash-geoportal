@@ -45,6 +45,10 @@ from functions.geoportal.v9.center_pivot_loader import build_center_pivot_layer
 from functions.geoportal.v9.datepalm_loader import build_datepalms_layer  # NEW
 from functions.geoportal.v9.ksa_bounds_loader import build_ksa_bounds_layer
 from functions.geoportal.v9.tree_health_loader import build_tree_health_layer, clear_tree_health_highlight
+from functions.geoportal.v9.datepalm_province_loader import (
+    build_date_palm_province_layer,
+    list_date_palm_provinces,
+)
 
 
 # -------------------------
@@ -64,21 +68,24 @@ TILES_HTTP_BASE: str = getattr(CFG, "tiles_http_base", "http://127.0.0.1:8766")
 
 PRODUCT_TREE_VEGE = "tree_vege"
 PRODUCT_DATEPALM = "datepalm"
+PRODUCT_DATEPALM_FIELDS = "datepalm_fields"
 PRODUCT_TREE_HEALTH = "tree_health"
 PRODUCT_SENSORS = "sensors"
 PRODUCT_CENTER_PIVOT = "cpf"
 
 PRODUCT_ORDER = [
-    PRODUCT_TREE_VEGE,
-    PRODUCT_DATEPALM,
     PRODUCT_TREE_HEALTH,
     PRODUCT_SENSORS,
     PRODUCT_CENTER_PIVOT,
+    PRODUCT_DATEPALM_FIELDS,
+    PRODUCT_DATEPALM,
+    PRODUCT_TREE_VEGE,
 ]
 
 PRODUCT_LABELS = {
     PRODUCT_TREE_VEGE: "Tree–Vege–NonVege Classification",
-    PRODUCT_DATEPALM: "Date Palm Fields",
+    PRODUCT_DATEPALM: "Date Palm Fields Qassim Manual",
+    PRODUCT_DATEPALM_FIELDS: "Date Palm Fields",
     PRODUCT_TREE_HEALTH: "Tree Health",
     PRODUCT_SENSORS: "Sensors in AlDka",
     PRODUCT_CENTER_PIVOT: "Center-Pivot Fields",
@@ -231,9 +238,11 @@ def _product_legend(product: str):
         return _legend_inline_row()
     if product == PRODUCT_TREE_HEALTH:
         return _tree_health_badges()
+    if product == PRODUCT_DATEPALM_FIELDS:
+        return solara.Div()
     if product == PRODUCT_DATEPALM:
         return solara.Markdown(
-            "Date Palm Fields — filled polygons representing Qassim farms, clipped to the current ROI.",
+            "Date Palm Fields Qassim Manual — filled polygons representing Qassim farms, clipped to the current ROI.",
             style={"fontSize": "0.9rem", "color": "#444", "marginTop": "0.5rem"},
         )
     if product == PRODUCT_CENTER_PIVOT:
@@ -323,6 +332,9 @@ def Page():
 
     cp_layer, set_cp_layer = solara.use_state(None)
     ksa_layer = None
+    province_names = solara.use_memo(list_date_palm_provinces, [])
+    selected_date_palm_province, set_selected_date_palm_province = solara.use_state(None)
+    date_palm_fields_layer, set_date_palm_fields_layer = solara.use_state(None)
 
     # --- Date Palms (Qassim) state ---
     dp_opacity, set_dp_opacity = solara.use_state(float(getattr(CFG, "datepalms_default_opacity", 0.55)))
@@ -562,6 +574,48 @@ def Page():
             },
         )
 
+    def _render_date_palm_province_buttons():
+        if not province_names:
+            return solara.Markdown(
+                "Province GeoPackages missing. Check the datasource directory.",
+                style={"fontSize": "0.85rem", "color": "#888"},
+            )
+
+        buttons = []
+        for province in province_names:
+            is_active = selected_date_palm_province == province
+            style_button = {
+                "minWidth": "190px",
+                "padding": "0.45rem 0.85rem",
+                "borderRadius": "999px",
+                "border": "none",
+                "background": "transparent",
+                "color": "#0284c7" if is_active else "#0f172a",
+                "fontWeight": "600" if is_active else "500",
+                "fontSize": "0.9rem",
+            }
+            buttons.append(
+                solara.Button(
+                    province,
+                    text=True,
+                    style=style_button,
+                    on_click=lambda event=None, target=province: _on_date_palm_fields_province_click(target),
+                )
+            )
+        return solara.Div(
+            children=buttons,
+            style={
+                "display": "grid",
+                "gridTemplateColumns": "repeat(7, minmax(0, 1fr))",
+                "gap": "0.7rem",
+                "maxWidth": "920px",
+            },
+        )
+
+    def _on_date_palm_fields_province_click(target: str):
+        _request_fit(PRODUCT_DATEPALM_FIELDS)
+        set_selected_date_palm_province(target)
+
     def _product_controls(product: str):
         base_style = {"alignItems": "center", "gap": "0.75rem", "flexWrap": "nowrap"}
         if product == PRODUCT_TREE_VEGE:
@@ -575,6 +629,23 @@ def Page():
                             _slider_float("Opacity", raster_opacity, set_raster_opacity, 0.0, 1.0, 0.01)
                         ],
                     )
+                ],
+            )
+        if product == PRODUCT_DATEPALM_FIELDS:
+            return solara.Row(
+                gap="0.5rem",
+                style={**base_style, "width": "100%"},
+                children=[
+                    solara.Div(
+                        style={"flex": "0 0 70%", "maxWidth": "70%"},
+                        children=[
+                            solara.Markdown(
+                                "Province – select a province to load the fields",
+                                style={"marginBottom": "0.35rem", "fontSize": "0.95rem"},
+                            ),
+                            _render_date_palm_province_buttons(),
+                        ],
+                    ),
                 ],
             )
         if product == PRODUCT_DATEPALM:
@@ -840,6 +911,64 @@ def Page():
     )
 
     # -------------------------
+    # Date Palm Fields (per province) build/attach helper
+    # -------------------------
+    def _ensure_date_palm_fields_layer():
+        nonlocal date_palm_fields_layer
+        if not selected_date_palm_province:
+            if date_palm_fields_layer and (date_palm_fields_layer in m.layers):
+                try:
+                    m.remove_layer(date_palm_fields_layer)
+                except Exception:
+                    pass
+            if date_palm_fields_layer is not None:
+                date_palm_fields_layer = None
+                set_date_palm_fields_layer(None)
+            return
+
+        existing = getattr(date_palm_fields_layer, "_province", None)
+        if date_palm_fields_layer is None or existing != selected_date_palm_province:
+            if date_palm_fields_layer and (date_palm_fields_layer in m.layers):
+                try:
+                    m.remove_layer(date_palm_fields_layer)
+                except Exception:
+                    pass
+            layer, err = build_date_palm_province_layer(selected_date_palm_province, m=m)
+            if err:
+                show_toast(err, "error")
+                set_date_palm_fields_layer(None)
+                return
+            set_date_palm_fields_layer(layer)
+            date_palm_fields_layer = layer
+            setattr(layer, "_province", selected_date_palm_province)
+
+        if date_palm_fields_layer is None:
+            return
+
+        if active_product == PRODUCT_DATEPALM_FIELDS:
+            anchor: ipyleaflet.Layer | None = None
+            if cp_layer and (cp_layer in m.layers):
+                anchor = cp_layer
+            elif dp_layer and (dp_layer in m.layers):
+                anchor = dp_layer
+            else:
+                anchor = raster_layer
+            if date_palm_fields_layer not in m.layers:
+                _insert_after(date_palm_fields_layer, anchor)
+            _maybe_fit_product(PRODUCT_DATEPALM_FIELDS, getattr(date_palm_fields_layer, "_bounds", None))
+        else:
+            if date_palm_fields_layer in m.layers:
+                try:
+                    m.remove_layer(date_palm_fields_layer)
+                except Exception:
+                    pass
+
+    solara.use_effect(
+        _ensure_date_palm_fields_layer,
+        [active_product, selected_date_palm_province, cp_layer, dp_layer, raster_layer],
+    )
+
+    # -------------------------
     # Date Palms (Qassim) build/attach helpers
     # -------------------------
     def _ensure_dp_layer():
@@ -993,36 +1122,37 @@ def Page():
                         on_click=lambda event=None, product=product: _select_product(product),
                         style=_product_button_style(product),
                     )
-            if active_product:
-                solara.Markdown(
-                    f"**Active product:** {PRODUCT_LABELS.get(active_product)}",
-                    style={"marginTop": "0.75rem"},
-                )
-            else:
-                solara.Markdown(
-                    "Select a product title to load the dataset and focus the map.",
-                    style={"marginTop": "0.75rem", "color": "#475467"},
-                )
-            legend_widget = _product_legend(active_product) if active_product else None
             controls_widget = _product_controls(active_product) if active_product else None
+            legend_items = []
+            if active_product:
+                legend_items.append(
+                    solara.Markdown(
+                        f"**Active product:** {PRODUCT_LABELS.get(active_product)}",
+                        style={"margin": "0", "fontSize": "0.95rem"},
+                    )
+                )
+                legend_extra = _product_legend(active_product)
+                if legend_extra:
+                    legend_items.append(legend_extra)
+            legend_widget = solara.Column(children=legend_items) if legend_items else None
             if legend_widget or controls_widget:
                 with solara.Row(
                     gap="1rem",
                     style={
                         "alignItems": "flex-start",
-                        "flexWrap": "wrap",
+                        "flexWrap": "nowrap",
                         "marginTop": "0.75rem",
                     },
                 ):
-                    if legend_widget:
-                        solara.Div(
-                            style={"flex": "1 1 240px", "minWidth": "240px"},
-                            children=[legend_widget],
-                        )
                     if controls_widget:
                         solara.Div(
-                            style={"flex": "0 0 auto"},
+                            style={"flex": "0 0 70%", "maxWidth": "70%"},
                             children=[controls_widget],
+                        )
+                    if legend_widget:
+                        solara.Div(
+                            style={"flex": "0 0 30%", "maxWidth": "30%"},
+                            children=[legend_widget],
                         )
             summary_widget = _product_summary(active_product)
             if summary_widget:

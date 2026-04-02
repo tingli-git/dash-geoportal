@@ -136,15 +136,23 @@ class Config:
     tree_health_total_count: int | None = 664
     popup_offset_ratio: float = 0.1
 
-    # --- Date Palm Fields (Qassim) — single GeoJSON file ---
+    # --- Date Palm Fields Qassim Manual (Qassim) — single GeoJSON file ---
     datepalms_geojson_file: Path = Path(
         "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms/Qassim_datepalm_fields_polygons.geojson"
     )
     datepalms_http_base: str = "http://127.0.0.1:8766/datepalms"
     datepalms_http_url: str = "http://127.0.0.1:8766/datepalms/Qassim_datepalm_fields_polygons.geojson"
-    datepalms_layer_name: str = "Date Palm Fields"
+    datepalms_layer_name: str = "Date Palm Fields Qassim Manual"
     datepalms_enabled: bool = True
     sensor_opacity_default: float = 1.0
+    datepalms_province_dir: Path = Path(
+        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_per_province"
+    )
+    datepalms_province_fill_color: str = "#84ff11"
+    datepalms_province_edge_color: str = "#5ea700"
+    datepalms_province_edge_weight: float = 2.0
+    datepalms_province_fill_opacity: float = 0.4
+    datepalms_province_hover_weight: float = 2.8
     # --- KSA bounds polygon 
     ksa_bounds_gpkg: Path = Path(
         "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/ksa_bounds/KSA_provincebounds.gpkg"
