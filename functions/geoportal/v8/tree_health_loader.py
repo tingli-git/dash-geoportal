@@ -102,6 +102,8 @@ def _collect_markers(
             opacity=marker_opacity,
         )
         setattr(marker, "_tree_health_default_color", color)
+        setattr(marker, "_tree_health_default_fill_color", color)
+        setattr(marker, "_tree_health_default_fill_opacity", fill_opacity)
 
         def _make_click_handler(lat_val, lon_val, props_snapshot, marker_ref):
             def _handler(**_):
@@ -168,6 +170,12 @@ def _restore_marker(marker: ipyleaflet.CircleMarker):
     if default:
         marker.fill_color = default
         marker.color = default
+    default_fill = getattr(marker, "_tree_health_default_fill_color", None)
+    default_opacity = getattr(marker, "_tree_health_default_fill_opacity", None)
+    if default_fill:
+        marker.fill_color = default_fill
+    if default_opacity is not None:
+        marker.fill_opacity = default_opacity
 
 
 def _highlight_marker(marker: ipyleaflet.CircleMarker):
