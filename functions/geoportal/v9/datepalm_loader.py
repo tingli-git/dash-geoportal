@@ -11,6 +11,7 @@ import ipyleaflet
 import ipywidgets as W
 import pandas as pd
 import plotly.graph_objects as go
+import geopandas as gpd
 
 from functions.geoportal.v9.config import CFG
 from functions.geoportal.v9.popups import show_popup
@@ -29,6 +30,45 @@ def _read_geojson_from_url(url: str) -> Dict[str, Any]:
     with urlopen(url) as r:
         data = r.read()
     return json.loads(data.decode("utf-8"))
+
+
+def _load_geojson_from_gpkg(path: Path) -> Dict[str, Any]:
+    gdf = gpd.read_file(path)
+    if gdf.crs and gdf.crs.to_epsg() != 4326:
+        try:
+            gdf = gdf.to_crs(4326)
+        except Exception:
+            pass
+    return json.loads(gdf.to_json())
+
+
+def _simplify_geojson(gj: Dict[str, Any], tolerance: float | None) -> Dict[str, Any]:
+    if tolerance is None or tolerance <= 0:
+        return gj
+
+    features = gj.get("features", [])
+    if not features:
+        return gj
+
+    try:
+        gdf = gpd.GeoDataFrame.from_features(features)
+    except Exception:
+        return gj
+
+    if gdf.empty:
+        return gj
+
+    try:
+        simplified = gdf.copy()
+        simplified["geometry"] = simplified.geometry.simplify(tolerance, preserve_topology=True)
+        return json.loads(simplified.to_json())
+    except Exception:
+        return gj
+
+
+def _read_geojson_from_path(path: Path) -> Dict[str, Any]:
+    text = path.read_text(encoding="utf-8")
+    return json.loads(text)
 
 
 def _parse_epsg_from_crs(crs_obj: Dict[str, Any] | None) -> str | None:
@@ -314,11 +354,41 @@ def _build_ndvi_widget(props: Dict[str, Any]) -> W.Widget:
         return W.HTML(f"<pre>Failed to load NDVI time series:\n{e}</pre>")
 
 
+def _read_geojson_from_path(path: Path) -> Dict[str, Any]:
+    text = path.read_text(encoding="utf-8")
+    return json.loads(text)
+
+
+def _load_datepalm_collection(simplify_tolerance: float | None) -> Tuple[Dict[str, Any], str]:
+    gpkg_path = Path(getattr(CFG, "datepalms_gpkg_file", ""))
+    geojson_path = Path(getattr(CFG, "datepalms_geojson_file", ""))
+    url = getattr(CFG, "datepalms_http_url", None)
+
+    data: Dict[str, Any]
+    source_desc = ""
+    if gpkg_path and gpkg_path.exists():
+        data = _read_geojson_from_gpkg(gpkg_path)
+        source_desc = str(gpkg_path)
+    elif geojson_path and geojson_path.exists():
+        data = _read_geojson_from_path(geojson_path)
+        source_desc = str(geojson_path)
+    elif url:
+        data = _read_geojson_from_url(url)
+        source_desc = url
+    else:
+        raise RuntimeError("No Date Palm source configured")
+
+    data = _maybe_fix_coords_and_reproject(data)
+    data = _simplify_geojson(data, simplify_tolerance)
+    return data, source_desc
+
+
 def build_datepalms_layer(
     *,
     visible: bool = True,
     m: ipyleaflet.Map | None = None,
     active_marker_ref: SimpleNamespace | None = None,
+    simplify_tolerance: float | None = None,
 ):
     """
     - Loads GeoJSON from CFG.datepalms_http_url
@@ -328,9 +398,16 @@ def build_datepalms_layer(
     - NDVI time series is shown via a separate button in the popup.
     """
     name = getattr(CFG, "datepalms_layer_name", "Date Palm Fields Qassim Manual (Qassim)")
-    url = getattr(CFG, "datepalms_http_url", None)
-    if not url:
-        return None, "CFG.datepalms_http_url is not set."
+    try:
+        gj, src_desc = _load_datepalm_collection(simplify_tolerance)
+    except RuntimeError as exc:
+        return None, str(exc)
+
+    if not isinstance(gj, dict):
+        return None, "Date Palm collection did not return valid GeoJSON"
+
+    if not gj.get("features"):
+        return None, "Date Palm GeoJSON contains no features"
 
     if m is not None and not hasattr(m, "_datepalms_highlight_layer"):
         m._datepalms_highlight_layer = None
@@ -345,11 +422,6 @@ def build_datepalms_layer(
         "datepalms_style_hover",
         {"weight": 3, "fillOpacity": 0.65},
     )
-
-    try:
-        gj = _read_geojson_from_url(url)
-    except Exception as e:
-        return None, f"Failed to fetch Date Palms GeoJSON: {e}"
 
     gj = _maybe_fix_coords_and_reproject(gj)
     bounds = _bounds_of_collection(gj)

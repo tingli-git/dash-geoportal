@@ -17,7 +17,9 @@
 # cloudflared tunnel --url http://localhost:8765
 # copy the url that can be shared to others
 from __future__ import annotations
+import json
 import math
+import sqlite3
 from pathlib import Path
 from typing import Optional, Tuple, List
 
@@ -45,10 +47,7 @@ from functions.geoportal.v9.center_pivot_loader import build_center_pivot_layer
 from functions.geoportal.v9.datepalm_loader import build_datepalms_layer  # NEW
 from functions.geoportal.v9.ksa_bounds_loader import build_ksa_bounds_layer
 from functions.geoportal.v9.tree_health_loader import build_tree_health_layer, clear_tree_health_highlight
-from functions.geoportal.v9.datepalm_province_loader import (
-    build_date_palm_province_layer,
-    list_date_palm_provinces,
-)
+from functions.geoportal.v9.datepalm_province_loader import list_date_palm_provinces
 
 
 # -------------------------
@@ -59,6 +58,7 @@ API_PREFIX = "/api"
 @solara_app.get(f"{API_PREFIX}/ping")
 def ping():
     return PlainTextResponse("pong")
+
 
 
 # -------------------------
@@ -152,6 +152,60 @@ def _roi_to_bounds(roi: tuple[float, float, float, float] | None) -> Optional[Li
         return None
     south, west, north, east = roi
     return [[south, west], [north, east]]
+
+
+def _bounds_to_bbox(bounds: List[List[float]] | None) -> Tuple[float, float, float, float] | None:
+    if not bounds or len(bounds) != 2:
+        return None
+    south, west = bounds[0]
+    north, east = bounds[1]
+    try:
+        return float(west), float(south), float(east), float(north)
+    except Exception:
+        return None
+
+
+def _tile_bounds_from_mbtiles(province: str) -> Optional[List[List[float]]]:
+    cache_dir = Path(getattr(CFG, "datepalms_tile_cache_dir", ""))
+    if not cache_dir or not cache_dir.is_dir():
+        return None
+    mbtiles = cache_dir / f"{province}.mbtiles"
+    if not mbtiles.exists():
+        return None
+    try:
+        conn = sqlite3.connect(mbtiles)
+        cur = conn.execute("SELECT value FROM metadata WHERE name='bounds'")
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        minx, miny, maxx, maxy = map(float, str(row[0]).split(","))
+        return [[miny, minx], [maxy, maxx]]
+    except Exception:
+        return None
+
+
+def _vector_layer_id_from_mbtiles(province: str) -> Optional[str]:
+    cache_dir = Path(getattr(CFG, "datepalms_tile_cache_dir", ""))
+    if not cache_dir or not cache_dir.is_dir():
+        return None
+    mbtiles = cache_dir / f"{province}.mbtiles"
+    if not mbtiles.exists():
+        return None
+    try:
+        conn = sqlite3.connect(mbtiles)
+        cur = conn.execute("SELECT value FROM metadata WHERE name='json'")
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        payload = json.loads(row[0])
+        vector_layers = payload.get("vector_layers", [])
+        if not vector_layers:
+            return None
+        return vector_layers[0].get("id")
+    except Exception:
+        return None
 
 
 # -------------------------
@@ -334,11 +388,13 @@ def Page():
     ksa_layer = None
     province_names = solara.use_memo(list_date_palm_provinces, [])
     selected_date_palm_province, set_selected_date_palm_province = solara.use_state(None)
-    date_palm_fields_layer, set_date_palm_fields_layer = solara.use_state(None)
+    date_palm_tile_layer, set_date_palm_tile_layer = solara.use_state(None)
 
     # --- Date Palms (Qassim) state ---
     dp_opacity, set_dp_opacity = solara.use_state(float(getattr(CFG, "datepalms_default_opacity", 0.55)))
-    dp_layer, set_dp_layer = solara.use_state(None)
+    dp_layer_full, set_dp_layer_full = solara.use_state(None)
+    dp_layer_simple, set_dp_layer_simple = solara.use_state(None)
+    dp_active_layer_ref = solara.use_ref(None)
 
     # --- Tree Health state ---
     th_opacity, set_th_opacity = solara.use_state(float(getattr(CFG, "tree_health_fill_opacity", 0.75)))
@@ -350,6 +406,7 @@ def Page():
     esri = solara.use_memo(esri_world_imagery_layer, [])
 
     map_debug_attached = solara.use_ref(False)
+    current_zoom, set_current_zoom = solara.use_state(getattr(CFG, "map_zoom", 6))
 
     def _attach_map_debug():
         if map_debug_attached.current:
@@ -369,6 +426,89 @@ def Page():
             pass
 
     solara.use_effect(_attach_map_debug, [])
+
+    def _attach_zoom_listener():
+        def _on_zoom(change):
+            if change.new is None:
+                return
+            set_current_zoom(float(change.new))
+
+        try:
+            m.observe(_on_zoom, names="zoom")
+        except Exception:
+            pass
+
+    solara.use_effect(_attach_zoom_listener, [])
+
+    def _tile_url_for_province(province: str) -> str:
+        return (
+            CFG.datepalms_tile_url_template
+            .replace("{base}", CFG.datepalms_tile_base_url)
+            .replace("{province}", province)
+        )
+
+    def _ensure_date_palm_tile_layer():
+        should_show = (
+            active_product == PRODUCT_DATEPALM_FIELDS
+            and selected_date_palm_province
+        )
+        if not should_show:
+            if date_palm_tile_layer and (date_palm_tile_layer in m.layers):
+                try:
+                    m.remove_layer(date_palm_tile_layer)
+                except Exception:
+                    pass
+            if date_palm_tile_layer is not None:
+                set_date_palm_tile_layer(None)
+            return
+
+        province = selected_date_palm_province
+        if not province:
+            return
+
+        existing = date_palm_tile_layer
+        if existing and getattr(existing, "_province", None) == province:
+            return
+        if existing and (existing in m.layers):
+            try:
+                m.remove_layer(existing)
+            except Exception:
+                pass
+
+        url = _tile_url_for_province(province)
+        print(
+            "[DATE PALM TILE] building",
+            dict(
+                province=province,
+                url=url,
+                tile_layer_exists=bool(existing),
+            ),
+        )
+        layer_styles = {}
+        layer_id = _vector_layer_id_from_mbtiles(province)
+        style_key = layer_id or "*"
+        layer_styles[style_key] = {
+            "fillColor": getattr(CFG, "datepalms_province_fill_color", "#84ff11"),
+            "color": getattr(CFG, "datepalms_province_edge_color", "#5ea700"),
+            "weight": float(getattr(CFG, "datepalms_province_edge_weight", 2.0)),
+            "fillOpacity": float(getattr(CFG, "datepalms_province_fill_opacity", 0.4)),
+        }
+        layer = ipyleaflet.VectorTileLayer(
+            url=url,
+            name=f"{CFG.datepalms_tile_layer_name} ({province})",
+            min_zoom=0,
+            max_zoom=int(getattr(CFG, "datepalms_tiles_max_zoom", 14)),
+            attribution="© local tiles",
+            renderer="svg",
+            vector_tile_layer_styles=layer_styles,
+        )
+        setattr(layer, "_province", province)
+        set_date_palm_tile_layer(layer)
+
+    solara.use_effect(
+        _ensure_date_palm_tile_layer,
+        [selected_date_palm_province, active_product],
+    )
 
     def _apply_product_zoom(product: str):
         target = PRODUCT_DEFAULT_ZOOM.get(product)
@@ -913,102 +1053,126 @@ def Page():
     # -------------------------
     # Date Palm Fields (per province) build/attach helper
     # -------------------------
-    def _ensure_date_palm_fields_layer():
-        nonlocal date_palm_fields_layer
-        if not selected_date_palm_province:
-            if date_palm_fields_layer and (date_palm_fields_layer in m.layers):
+
+    def _sync_date_palm_fields_layers():
+        def _remove(layer):
+            if layer and (layer in m.layers):
                 try:
-                    m.remove_layer(date_palm_fields_layer)
+                    m.remove_layer(layer)
                 except Exception:
                     pass
-            if date_palm_fields_layer is not None:
-                date_palm_fields_layer = None
-                set_date_palm_fields_layer(None)
+
+        anchor: ipyleaflet.Layer | None = cp_layer if (cp_layer and cp_layer in m.layers) else raster_layer
+        if active_product != PRODUCT_DATEPALM_FIELDS or not selected_date_palm_province:
+            _remove(date_palm_tile_layer)
             return
 
-        existing = getattr(date_palm_fields_layer, "_province", None)
-        if date_palm_fields_layer is None or existing != selected_date_palm_province:
-            if date_palm_fields_layer and (date_palm_fields_layer in m.layers):
-                try:
-                    m.remove_layer(date_palm_fields_layer)
-                except Exception:
-                    pass
-            layer, err = build_date_palm_province_layer(selected_date_palm_province, m=m)
-            if err:
-                show_toast(err, "error")
-                set_date_palm_fields_layer(None)
-                return
-            set_date_palm_fields_layer(layer)
-            date_palm_fields_layer = layer
-            setattr(layer, "_province", selected_date_palm_province)
-
-        if date_palm_fields_layer is None:
-            return
-
-        if active_product == PRODUCT_DATEPALM_FIELDS:
-            anchor: ipyleaflet.Layer | None = None
-            if cp_layer and (cp_layer in m.layers):
-                anchor = cp_layer
-            elif dp_layer and (dp_layer in m.layers):
-                anchor = dp_layer
-            else:
-                anchor = raster_layer
-            if date_palm_fields_layer not in m.layers:
-                _insert_after(date_palm_fields_layer, anchor)
-            _maybe_fit_product(PRODUCT_DATEPALM_FIELDS, getattr(date_palm_fields_layer, "_bounds", None))
-        else:
-            if date_palm_fields_layer in m.layers:
-                try:
-                    m.remove_layer(date_palm_fields_layer)
-                except Exception:
-                    pass
+        print("[DEBUG date palm sync]", dict(
+            active_product=active_product,
+            selected_province=selected_date_palm_province,
+            current_zoom=current_zoom,
+            tile_layer_exists=bool(date_palm_tile_layer),
+            layers=[type(layer).__name__ for layer in m.layers],
+        ))
+        if date_palm_tile_layer and date_palm_tile_layer not in m.layers:
+            print("[DEBUG add layer]", dict(
+                anchor_type=type(anchor).__name__ if anchor else None,
+                layers_before=[type(layer).__name__ for layer in m.layers],
+            ))
+            _insert_after(date_palm_tile_layer, anchor)
+            print("[DEBUG layers after insert]", [type(layer).__name__ for layer in m.layers])
+        tile_bounds = _tile_bounds_from_mbtiles(selected_date_palm_province)
+        if tile_bounds:
+            _maybe_fit_product(PRODUCT_DATEPALM_FIELDS, tile_bounds)
 
     solara.use_effect(
-        _ensure_date_palm_fields_layer,
-        [active_product, selected_date_palm_province, cp_layer, dp_layer, raster_layer],
+        _sync_date_palm_fields_layers,
+        [
+            active_product,
+            selected_date_palm_province,
+            cp_layer,
+            raster_layer,
+            date_palm_tile_layer,
+        ],
     )
 
     # -------------------------
     # Date Palms (Qassim) build/attach helpers
     # -------------------------
     def _ensure_dp_layer():
-        nonlocal dp_layer
-        print(f"[DATEPALM] active={active_product} dp_layer_set={dp_layer is not None}")
-        if dp_layer is None:
-            layer, err = build_datepalms_layer(visible=True, m=m, active_marker_ref=refs.active_marker_ref)
+        nonlocal dp_layer_full, dp_layer_simple
+        if not dp_layer_full:
+            layer, err = build_datepalms_layer(
+                visible=True,
+                m=m,
+                active_marker_ref=refs.active_marker_ref,
+                simplify_tolerance=None,
+            )
             if err:
                 show_toast(err, "error")
-                set_dp_layer(None)
-                return
+            else:
+                try:
+                    style_now = dict(getattr(layer, "style", {}) or {})
+                    style_now["fillOpacity"] = float(dp_opacity)
+                    layer.style = style_now
+                except Exception:
+                    pass
+                set_dp_layer_full(layer)
 
+        if not dp_layer_simple:
+            tolerance = getattr(CFG, "datepalms_simplify_tolerance", None)
+            if tolerance is not None and tolerance > 0:
+                layer, err = build_datepalms_layer(
+                    visible=False,
+                    m=m,
+                    active_marker_ref=refs.active_marker_ref,
+                    simplify_tolerance=tolerance,
+                )
+                if err:
+                    show_toast(err, "error")
+                else:
+                    try:
+                        layer.style = {**(getattr(layer, "style", {}) or {}), "opacity": 0.85}
+                    except Exception:
+                        pass
+                    set_dp_layer_simple(layer)
+        return
+
+    solara.use_effect(_ensure_dp_layer, [active_product, dp_opacity, cp_layer, raster_layer])
+
+    def _sync_datepalm_display():
+        if active_product != PRODUCT_DATEPALM:
+            for layer in (dp_layer_full, dp_layer_simple):
+                if layer and (layer in m.layers):
+                    try:
+                        m.remove_layer(layer)
+                    except Exception:
+                        pass
+            return
+
+        anchor = cp_layer if (cp_layer and cp_layer in m.layers) else raster_layer
+        desired = dp_layer_simple if (current_zoom <= 14 and dp_layer_simple) else dp_layer_full
+        other = dp_layer_full if desired is dp_layer_simple else dp_layer_simple
+
+        if other and (other in m.layers):
             try:
-                style_now = dict(getattr(layer, "style", {}) or {})
-                style_now.setdefault("color", "#0B6E4F")
-                style_now.setdefault("weight", 2)
-                style_now.setdefault("fillColor", "#74C69D")
-                style_now["fillOpacity"] = float(dp_opacity)
-                layer.style = style_now
+                m.remove_layer(other)
             except Exception:
                 pass
 
-            set_dp_layer(layer)
+        if desired and desired not in m.layers:
+            _insert_after(desired, anchor)
+        if desired:
+            _maybe_fit_product(PRODUCT_DATEPALM, getattr(desired, "_bounds", None))
 
-        if dp_layer is None:
-            return
-
-        if active_product == PRODUCT_DATEPALM:
-            anchor = cp_layer if (cp_layer and cp_layer in m.layers) else raster_layer
-            if dp_layer not in m.layers:
-                _insert_after(dp_layer, anchor)
-            _maybe_fit_product(PRODUCT_DATEPALM, getattr(dp_layer, "_bounds", None))
-        else:
-            if dp_layer in m.layers:
-                try:
-                    m.remove_layer(dp_layer)
-                except Exception:
-                    pass
-
-    solara.use_effect(_ensure_dp_layer, [active_product, dp_opacity, cp_layer, raster_layer])
+    solara.use_effect(_sync_datepalm_display, [
+        active_product,
+        current_zoom,
+        dp_layer_full,
+        dp_layer_simple,
+        cp_layer,
+        raster_layer,
+    ])
 
     # -------------------------
     # Tree Health points layer
@@ -1035,13 +1199,11 @@ def Page():
                 pass
 
         if active_product == PRODUCT_TREE_HEALTH:
-            anchor: ipyleaflet.Layer | None = None
-            if dp_layer and (dp_layer in m.layers):
-                anchor = dp_layer
-            elif cp_layer and (cp_layer in m.layers):
-                anchor = cp_layer
-            else:
-                anchor = raster_layer
+            anchor: ipyleaflet.Layer | None = cp_layer if (cp_layer and cp_layer in m.layers) else raster_layer
+            for layer in (dp_layer_full, dp_layer_simple):
+                if layer and (layer in m.layers):
+                    anchor = layer
+                    break
             if th_layer not in m.layers:
                 _insert_after(th_layer, anchor)
             _maybe_fit_product(PRODUCT_TREE_HEALTH, getattr(th_layer, "_bounds", None))
@@ -1053,7 +1215,7 @@ def Page():
                     pass
             clear_tree_health_highlight()
 
-    solara.use_effect(_ensure_th_layer, [active_product, dp_layer, cp_layer, raster_layer, th_opacity])
+    solara.use_effect(_ensure_th_layer, [active_product, dp_layer_full, dp_layer_simple, cp_layer, raster_layer, th_opacity])
 
     # -------------------------
     # Keep sensors on top whenever either overlay (CPF/DP) changes
@@ -1068,7 +1230,7 @@ def Page():
                 pass
             m.add_layer(icon_group)
 
-    solara.use_effect(_float_sensors_top, [icon_group, cp_layer, dp_layer, th_layer, active_product])
+    solara.use_effect(_float_sensors_top, [icon_group, cp_layer, dp_layer_full, dp_layer_simple, th_layer, active_product])
 
     def _select_product(product: str):
         if product == active_product:
