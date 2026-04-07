@@ -10,31 +10,40 @@ A beginner-friendly template to build a local-first geospatial portal with:
 
 ## 0) Install
 ```bash
-python -m venv .venv
+cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
+#python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+#pip install -r requirements.txt
+python -m pip install -e . 
 ```
 
-## 0.5) Run the Geoportal v9 Solara stack
-```bash
-# functions/geoportal/v9/app.py
-# cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
-# source .venv/bin/activate
-# cd /datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server
-# python scripts/app_server_index.py
-#-----------------------------------
-# in another terminal:
-# cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
-# source .venv/bin/activate
-# python -m pip install -e .
-# solara run --production /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/functions/geoportal/v9/app.py 
-## if solara not founded, run $ hash -r 
-# solara application will be running at localhost:8765
-# ------------------------------------
-# in the third terminal 
-# cloudflared tunnel --url http://localhost:8765
-# copy the url that can be shared to others
-```
+## 0.5) Run the Geoportal v9 stack
+You need two dedicated servers before the Solara app:
+
+1. **Vector tile/CORS server (port 8766)**  
+   Serve `/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server` so both the raster subfolders and `datepalms_tiles` are reachable with `Access-Control-Allow-Origin`. From the repo root run:
+   ```bash
+   cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal
+   source .venv/bin/activate
+   python scripts/start_tile_server.py \
+     --directory /datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server \
+     --host 0.0.0.0 \
+     --port 8766
+   ```
+   The script uses a threaded HTTP server, so consult `Access-Control-Allow-*` headers while developing. Leave this process running while you work with the dashboard.
+
+2. **Solara dashboard (port 8765)**  
+   In another terminal:
+   ```bash
+   cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
+   source .venv/bin/activate
+   python -m pip install -e .
+   solara run --production functions/geoportal/v9/app.py
+   ```
+   If `solara` isn’t found, run `hash -r` or reinstall within the active virtualenv. The dashboard will start at `http://localhost:8765`.
+
+3. **Optional: share the app**  
+   If you need a public URL, start `cloudflared tunnel --url http://localhost:8765` in a third terminal and copy the auto-generated address to share with stakeholders.
 
 ## 0.75) Prebuild simplified Date Palm Fields (optional)
 
@@ -52,6 +61,7 @@ The script reads each `.gpkg` inside `/datawaha/esom/DatePalmCounting/Geoportal/
 Before you start the hybrid map (tiles + polygons), prebuild vector tiles for every province and host them with your HTTP server (e.g., the same `python -m http.server 8766` process can serve the cache directory).
 
 ```bash
+cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
 source .venv/bin/activate
 python scripts/build_province_tiles.py --force
 python scripts/export_province_tiles.py --force
@@ -59,11 +69,6 @@ python scripts/export_province_tiles.py --force
 
 This runs the `tippecanoe` binary located at `/datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/tippecanoe/tippecanoe`, iterates through every `.gpkg` in `/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_per_province`, and writes `*.mbtiles` files with the same province name into `datepalms_tile_cache`. Make sure your tile server exposes `/{z}/{x}/{y}.pbf` for that directory before launching the dashboard so it can switch to the tile view when zoomed out.
 
-## 1) Run
-```bash
-python app.py
-```
-Open http://127.0.0.1:8050
 
 ## 2) Add your sensors
 - Put your points in `data/sensors.geojson` (GeoJSON Point features).

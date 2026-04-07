@@ -91,6 +91,11 @@ PRODUCT_LABELS = {
     PRODUCT_CENTER_PIVOT: "Center-Pivot Fields",
 }
 
+PROVINCE_NATIONAL = "__national__"
+PROVINCE_LABELS = {
+    PROVINCE_NATIONAL: "NATIONAL",
+}
+
 PRODUCT_DEFAULT_ZOOM = {
     PRODUCT_TREE_HEALTH: 16,
     PRODUCT_SENSORS: 16,
@@ -388,7 +393,9 @@ def Page():
     ksa_layer = None
     province_names = solara.use_memo(list_date_palm_provinces, [])
     selected_date_palm_province, set_selected_date_palm_province = solara.use_state(None)
-    date_palm_tile_layer, set_date_palm_tile_layer = solara.use_state(None)
+    date_palm_tile_layers, set_date_palm_tile_layers = solara.use_state([])
+    date_palm_tile_provinces, set_date_palm_tile_provinces = solara.use_state([])
+    date_palm_last_fit_province = solara.use_ref(None)
 
     # --- Date Palms (Qassim) state ---
     dp_opacity, set_dp_opacity = solara.use_state(float(getattr(CFG, "datepalms_default_opacity", 0.55)))
@@ -447,41 +454,23 @@ def Page():
             .replace("{province}", province)
         )
 
-    def _ensure_date_palm_tile_layer():
-        should_show = (
-            active_product == PRODUCT_DATEPALM_FIELDS
-            and selected_date_palm_province
-        )
-        if not should_show:
-            if date_palm_tile_layer and (date_palm_tile_layer in m.layers):
+    def _cleanup_date_palm_tile_layers():
+        for layer in date_palm_tile_layers:
+            if layer and (layer in m.layers):
                 try:
-                    m.remove_layer(date_palm_tile_layer)
+                    m.remove_layer(layer)
                 except Exception:
                     pass
-            if date_palm_tile_layer is not None:
-                set_date_palm_tile_layer(None)
-            return
+        set_date_palm_tile_layers([])
+        set_date_palm_tile_provinces([])
 
-        province = selected_date_palm_province
-        if not province:
-            return
-
-        existing = date_palm_tile_layer
-        if existing and getattr(existing, "_province", None) == province:
-            return
-        if existing and (existing in m.layers):
-            try:
-                m.remove_layer(existing)
-            except Exception:
-                pass
-
+    def _build_tile_layer(province: str) -> ipyleaflet.VectorTileLayer:
         url = _tile_url_for_province(province)
         print(
             "[DATE PALM TILE] building",
             dict(
                 province=province,
                 url=url,
-                tile_layer_exists=bool(existing),
             ),
         )
         layer_styles = {}
@@ -503,7 +492,33 @@ def Page():
             vector_tile_layer_styles=layer_styles,
         )
         setattr(layer, "_province", province)
-        set_date_palm_tile_layer(layer)
+        return layer
+
+    def _ensure_date_palm_tile_layer():
+        should_show = (
+            active_product == PRODUCT_DATEPALM_FIELDS
+            and selected_date_palm_province
+        )
+        if not should_show:
+            _cleanup_date_palm_tile_layers()
+            return
+
+        provinces = (
+            list(province_names)
+            if selected_date_palm_province == PROVINCE_NATIONAL
+            else [selected_date_palm_province]
+        )
+        if not provinces:
+            _cleanup_date_palm_tile_layers()
+            return
+
+        if date_palm_tile_provinces == provinces:
+            return
+
+        _cleanup_date_palm_tile_layers()
+        new_layers = [ _build_tile_layer(province) for province in provinces ]
+        set_date_palm_tile_layers(new_layers)
+        set_date_palm_tile_provinces(provinces)
 
     solara.use_effect(
         _ensure_date_palm_tile_layer,
@@ -722,7 +737,9 @@ def Page():
             )
 
         buttons = []
-        for province in province_names:
+        buttons = []
+        all_provinces = list(province_names) + [PROVINCE_NATIONAL]
+        for province in all_provinces:
             is_active = selected_date_palm_province == province
             style_button = {
                 "minWidth": "190px",
@@ -734,9 +751,10 @@ def Page():
                 "fontWeight": "600" if is_active else "500",
                 "fontSize": "0.9rem",
             }
+            label = PROVINCE_LABELS.get(province, province)
             buttons.append(
                 solara.Button(
-                    province,
+                    label,
                     text=True,
                     style=style_button,
                     on_click=lambda event=None, target=province: _on_date_palm_fields_province_click(target),
@@ -753,7 +771,9 @@ def Page():
         )
 
     def _on_date_palm_fields_province_click(target: str):
-        _request_fit(PRODUCT_DATEPALM_FIELDS)
+        if date_palm_last_fit_province.current != target:
+            _request_fit(PRODUCT_DATEPALM_FIELDS)
+            date_palm_last_fit_province.current = target
         set_selected_date_palm_province(target)
 
     def _product_controls(product: str):
@@ -1064,24 +1084,36 @@ def Page():
 
         anchor: ipyleaflet.Layer | None = cp_layer if (cp_layer and cp_layer in m.layers) else raster_layer
         if active_product != PRODUCT_DATEPALM_FIELDS or not selected_date_palm_province:
-            _remove(date_palm_tile_layer)
+            for layer in date_palm_tile_layers:
+                _remove(layer)
             return
 
         print("[DEBUG date palm sync]", dict(
             active_product=active_product,
             selected_province=selected_date_palm_province,
             current_zoom=current_zoom,
-            tile_layer_exists=bool(date_palm_tile_layer),
+            tile_layers=len(date_palm_tile_layers),
             layers=[type(layer).__name__ for layer in m.layers],
         ))
-        if date_palm_tile_layer and date_palm_tile_layer not in m.layers:
-            print("[DEBUG add layer]", dict(
-                anchor_type=type(anchor).__name__ if anchor else None,
-                layers_before=[type(layer).__name__ for layer in m.layers],
-            ))
-            _insert_after(date_palm_tile_layer, anchor)
-            print("[DEBUG layers after insert]", [type(layer).__name__ for layer in m.layers])
-        tile_bounds = _tile_bounds_from_mbtiles(selected_date_palm_province)
+
+        for layer in date_palm_tile_layers:
+            if layer and layer not in m.layers:
+                print("[DEBUG add layer]", dict(
+                    anchor_type=type(anchor).__name__ if anchor else None,
+                    layers_before=[type(layer).__name__ for layer in m.layers],
+                    province=getattr(layer, "_province", None),
+                ))
+                _insert_after(layer, anchor)
+                print("[DEBUG layers after insert]", [type(layer).__name__ for layer in m.layers])
+
+        provinces = (
+            list(province_names)
+            if selected_date_palm_province == PROVINCE_NATIONAL
+            else [selected_date_palm_province]
+        )
+        tile_bounds = None
+        if len(provinces) == 1:
+            tile_bounds = _tile_bounds_from_mbtiles(provinces[0])
         if tile_bounds:
             _maybe_fit_product(PRODUCT_DATEPALM_FIELDS, tile_bounds)
 
@@ -1092,7 +1124,7 @@ def Page():
             selected_date_palm_province,
             cp_layer,
             raster_layer,
-            date_palm_tile_layer,
+            date_palm_tile_layers,
         ],
     )
 
@@ -1236,6 +1268,8 @@ def Page():
         if product == active_product:
             return
         _clear_popups()
+        if product != PRODUCT_DATEPALM_FIELDS:
+            date_palm_last_fit_province.current = None
         _request_fit(product)
         set_active_product(product)
 
