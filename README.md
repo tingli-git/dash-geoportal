@@ -17,7 +17,7 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 python -m pip install -e . 
 ```
 
-## 0.5) Run the Geoportal v9 stack
+## 0.5) Run the Geoportal v9 stack (legacy)
 You need two dedicated servers before the Solara app:
 
 1. **Vector tile/CORS server (port 8766)**  
@@ -38,12 +38,22 @@ You need two dedicated servers before the Solara app:
    cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
    source .venv/bin/activate
    python -m pip install -e .
-   solara run --production functions/geoportal/v9/app.py
+  solara run --production functions/geoportal/v9/app.py
    ```
    If `solara` isn’t found, run `hash -r` or reinstall within the active virtualenv. The dashboard will start at `http://localhost:8765`.
 
 3. **Optional: share the app**  
    If you need a public URL, start `cloudflared tunnel --url http://localhost:8765` in a third terminal and copy the auto-generated address to share with stakeholders.
+
+## 0.6) Run the Geoportal v10 stack
+The v10 stack builds on the same infrastructure but points to the new code in `functions/geoportal/v10`. Use the identical tile/CORS server above, then run:
+```bash
+cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
+source .venv/bin/activate
+python -m pip install -e .
+solara run --production functions/geoportal/v10/app.py
+```
+The v10 app loads its configuration from `functions/geoportal/v10/config.py` (a copy of the v9 config) and shares the same helpers under `functions/geoportal/v10/*`. You can still expose it with Cloudflare as before if you need a shareable URL.
 
 ## 0.75) Prebuild simplified Date Palm Fields (optional)
 
@@ -68,6 +78,16 @@ python scripts/export_province_tiles.py --force
 ```
 
 This runs the `tippecanoe` binary located at `/datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/tippecanoe/tippecanoe`, iterates through every `.gpkg` in `/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_per_province`, and writes `*.mbtiles` files with the same province name into `datepalms_tile_cache`. Make sure your tile server exposes `/{z}/{x}/{y}.pbf` for that directory before launching the dashboard so it can switch to the tile view when zoomed out.
+
+### (Optional) Normalize province GeoPackages
+If you want globally unique IDs for each field plus a province ID lookup, normalize the source GeoPackages before vectorizing:
+```bash
+source .venv/bin/activate
+python scripts/normalize_provinces.py \
+  --dir /datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_per_province \
+  --mapping datepalms_province_ids.json
+```
+Each rewritten `.gpkg` now contains `field_id`, `province_id`, and `esti_tree_number`, and you can reference `datepalms_province_ids.json` (which maps each `province_id` to the province name) elsewhere in the dashboard.
 
 
 ## 2) Add your sensors
