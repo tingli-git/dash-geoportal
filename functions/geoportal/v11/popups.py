@@ -1,4 +1,3 @@
-# functions/geoportal/v11/popups.py
 from __future__ import annotations
 from typing import Any, Callable, Optional
 
@@ -17,29 +16,16 @@ def show_popup(
     props: Optional[dict[str, Any]],
     marker: Optional[ipyleaflet.Marker],
     active_marker_ref,
-    # Optional callback: given feature props, returns an ipywidget to render (or None).
     on_show_timeseries: Optional[Callable[[dict], W.Widget | None]] = None,
-    # Optional label so sensors + NDVI can use different button text
     timeseries_button_label: Optional[str] = None,
     min_width: int | None = None,
     max_width: int | None = None,
 ) -> None:
     """
     Open a Leaflet popup at (lat, lon) showing a key/value table from `props`,
-    and optionally a time-series widget (sensor or NDVI) under a button.
+    and optionally a time-series widget under a button.
     """
-    try:
-        prev_center = tuple(m.center) if m.center is not None else None
-    except Exception:
-        prev_center = None
-    try:
-        prev_zoom = m.zoom
-    except Exception:
-        prev_zoom = None
-
-    # -------------------------
     # Marker icon highlight (for sensors only)
-    # -------------------------
     if marker is not None:
         try:
             if active_marker_ref.current and active_marker_ref.current is not marker:
@@ -58,9 +44,6 @@ def show_popup(
         except Exception:
             pass
 
-    # -------------------------
-    # Build popup content
-    # -------------------------
     table = html_table_popup(props or {})
     child: W.Widget = table
 
@@ -89,48 +72,41 @@ def show_popup(
         btn.on_click(_on_click)
         child = W.VBox([table, btn, out])
 
-    # -------------------------
-    # Replace any existing popups, then add new one
-    # -------------------------
+    suppress_attr = "_suppress_popup_clear"
+    suppress_owned = False
+    if not getattr(m, suppress_attr, False):
+        setattr(m, suppress_attr, True)
+        suppress_owned = True
+
     try:
         for layer in list(m.layers):
             if isinstance(layer, ipyleaflet.Popup):
                 m.remove_layer(layer)
-    except Exception:
-        pass
 
-    popup = ipyleaflet.Popup(
-        location=(float(lat), float(lon)),
-        child=child,
-        close_button=True,
-        auto_close=True,
-        close_on_escape_key=True,
-        auto_pan=False,
-        keep_in_view=False,
-        min_width=min_width or 1800,
-        max_width=max_width or 3000,
-    )
+        popup = ipyleaflet.Popup(
+            location=(float(lat), float(lon)),
+            child=child,
+            close_button=True,
+            auto_close=True,
+            close_on_escape_key=True,
+            auto_pan=False,
+            keep_in_view=False,
+            min_width=min_width or 1800,
+            max_width=max_width or 3000,
+        )
 
-    offset_ratio = getattr(CFG, "popup_offset_ratio", 0.0) or 0.0
-    offset_pct = int(round(offset_ratio * 100))
-    if offset_pct:
-        try:
-            popup.layout.transform = f"translateY(-{offset_pct}vh)"
-            popup.layout.margin = f"0 0 {offset_pct}vh 0"
-        except Exception:
-            pass
+        offset_ratio = getattr(CFG, "popup_offset_ratio", 0.0) or 0.0
+        offset_pct = int(round(offset_ratio * 100))
+        if offset_pct:
+            try:
+                popup.layout.transform = f"translateY(-{offset_pct}vh)"
+                popup.layout.margin = f"0 0 {offset_pct}vh 0"
+            except Exception:
+                pass
 
-    m.add_layer(popup)
+        m.add_layer(popup)
+    finally:
+        if suppress_owned:
+            setattr(m, suppress_attr, False)
 
-    print(f"[POPUP] showing {props.get('sensor_id') or props.get('name') or 'sensor'}")
-    try:
-        if prev_center is not None and tuple(m.center) != tuple(prev_center):
-            m.center = prev_center
-        if prev_zoom is not None and m.zoom != prev_zoom:
-            m.zoom = prev_zoom
-    except Exception:
-        pass
-    if prev_center is not None:
-        setattr(m, "_pending_center_restore", prev_center)
-    if prev_zoom is not None:
-        setattr(m, "_pending_zoom_restore", prev_zoom)
+    print(f"[POPUP] showing {props.get('sensor_id') or props.get('name') or 'feature'}")

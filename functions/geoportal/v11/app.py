@@ -29,7 +29,6 @@ from urllib.request import urlopen, urlretrieve
 import geopandas as gpd
 import solara
 import ipyleaflet
-from ipywidgets import HTML
 import ipywidgets as W
 
 from starlette.responses import PlainTextResponse
@@ -428,6 +427,8 @@ def Page():
 
     map_debug_attached = solara.use_ref(False)
     current_zoom, set_current_zoom = solara.use_state(getattr(CFG, "map_zoom", 6))
+    popup_watchers_attached = solara.use_ref(False)
+    layer_signature_ref = solara.use_ref(None)
 
     def _attach_map_debug():
         if map_debug_attached.current:
@@ -477,6 +478,20 @@ def Page():
             if not event:
                 return
             event_type = event.get("type")
+            if event_type in {
+                "moveend",
+                "zoomend",
+                "dragend",
+                "overlayadd",
+                "overlayremove",
+                "baselayerchange",
+                "layeradd",
+                "layerremove",
+            }:
+                _clear_popups()
+                set_click_point(None)
+                set_hover_point(None)
+                return
             if event_type not in {"click", "mousemove", "mouseover", "mouseout"}:
                 return
             coords = event.get("coordinates")
@@ -623,6 +638,7 @@ def Page():
         set_date_palm_tile_layers({})
 
     def _cleanup_highres_layer():
+        _clear_popups()
         if highres_layer and (highres_layer in m.layers):
             try:
                 m.remove_layer(highres_layer)
@@ -725,41 +741,6 @@ def Page():
 
     solara.use_effect(_ensure_ksa_layer, [m, esri])
 
-    def _attach_restore_view():
-        if getattr(m, "_pending_restore_observer", False):
-            return
-
-        def _center_observer(change):
-            pending = getattr(m, "_pending_center_restore", None)
-            if not pending:
-                return
-            if change.new is None:
-                return
-            if tuple(change.new) != tuple(pending):
-                setattr(m, "_pending_center_restore", None)
-                try:
-                    m.center = pending
-                except Exception:
-                    pass
-
-        def _zoom_observer(change):
-            pending_zoom = getattr(m, "_pending_zoom_restore", None)
-            if pending_zoom is None:
-                return
-            if change.new is None:
-                return
-            if change.new != pending_zoom:
-                setattr(m, "_pending_zoom_restore", None)
-                try:
-                    m.zoom = pending_zoom
-                except Exception:
-                    pass
-
-        m.observe(_center_observer, names="center")
-        m.observe(_zoom_observer, names="zoom")
-        m._pending_restore_observer = True
-
-    solara.use_effect(_attach_restore_view, [])
 
     def _cleanup_on_product_change():
         if active_product == PRODUCT_DATEPALM_FIELDS:
@@ -833,6 +814,11 @@ def Page():
                     m.remove_layer(layer)
         except Exception:
             pass
+        field_popup_ref.current = None
+        set_field_info(None)
+        set_click_point(None)
+        set_hover_point(None)
+        set_hover_field_record(None)
         for attr in ("_datepalms_highlight_layer", "_cpf_highlight_layer"):
             try:
                 existing = getattr(m, attr, None)
@@ -846,6 +832,61 @@ def Page():
             clear_tree_health_highlight()
         except Exception:
             pass
+
+
+    def _non_popup_layer_signature():
+        signature = []
+        for layer in list(m.layers):
+            if isinstance(layer, ipyleaflet.Popup):
+                continue
+            try:
+                name = getattr(layer, "name", None)
+            except Exception:
+                name = None
+            signature.append((type(layer).__name__, name))
+        return tuple(signature)
+
+    def _attach_popup_watchers():
+        if popup_watchers_attached.current:
+            return
+
+        def _on_center(change):
+            if getattr(m, "_suppress_popup_clear", False):
+                return
+            if change.new is None or change.old is None:
+                return
+            if tuple(change.new) != tuple(change.old):
+                _clear_popups()
+
+        def _on_zoom(change):
+            if getattr(m, "_suppress_popup_clear", False):
+                return
+            if change.new is None or change.old is None:
+                return
+            if change.new != change.old:
+                _clear_popups()
+
+        def _on_layers(change):
+            if getattr(m, "_suppress_popup_clear", False):
+                return
+            new_sig = _non_popup_layer_signature()
+            old_sig = layer_signature_ref.current
+            layer_signature_ref.current = new_sig
+            if old_sig is None:
+                return
+            if new_sig != old_sig:
+                _clear_popups()
+
+        try:
+            layer_signature_ref.current = _non_popup_layer_signature()
+            m.observe(_on_center, names="center")
+            m.observe(_on_zoom, names="zoom")
+            m.observe(_on_layers, names="layers")
+            popup_watchers_attached.current = True
+        except Exception:
+            pass
+
+    solara.use_effect(_attach_popup_watchers, [m])
 
     def _refresh_cp_layer():
         nonlocal cp_layer
@@ -950,6 +991,7 @@ def Page():
         )
 
     def _on_date_palm_fields_province_click(target: str):
+        _clear_popups()
         set_selected_date_palm_province(target)
 
     def _product_controls(product: str):
@@ -987,6 +1029,7 @@ def Page():
                                         "Test Tabuk (geo)",
                                         text=True,
                                         on_click=lambda _event=None: (
+                                            _clear_popups(),
                                             set_selected_date_palm_province("Tabuk"),
                                             set_test_geo_province("Tabuk")
                                         ),
@@ -995,7 +1038,10 @@ def Page():
                                     solara.Button(
                                         "Clear Test Geo",
                                         text=True,
-                                        on_click=lambda _event=None: set_test_geo_province(None),
+                                        on_click=lambda _event=None: (
+                                            _clear_popups(),
+                                            set_test_geo_province(None)
+                                        ),
                                         style={"color": "#c026d3", "fontWeight": "600"},
                                     ),
                                 ],
@@ -1229,6 +1275,7 @@ def Page():
         }
 
     def _maybe_load_highres_layer():
+        _clear_popups()
         target_province = _highres_province()
         bbox = _bounds_to_bbox(getattr(m, "bounds", None))
         if test_geo_province and current_zoom < HIGHRES_ZOOM_THRESHOLD:
