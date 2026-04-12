@@ -75,6 +75,16 @@ solara run --production functions/geoportal/v10/app.py
 ```
 The v10 app loads its configuration from `functions/geoportal/v10/config.py` (a copy of the v9 config) and shares the same helpers under `functions/geoportal/v10/*`. You can still expose it with Cloudflare as before if you need a shareable URL.
 
+## 0.65) Run the Geoportal v11 stack
+The v11 stack keeps the same infrastructure but points at `functions/geoportal/v11`. Before starting it, run `scripts/normalize_provinces.py` so `/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_provinces.json` exists—the v11 app uses that JSON plus the `field_id`/`province_id` attributes (served through the tiles on port 8766) to look up metadata. Then launch:
+```bash
+cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
+source .venv/bin/activate
+python -m pip install -e .
+solara run --production functions/geoportal/v11/app.py
+```
+The Date Palm Fields product now stays at the national zoom (level 6), uses the green `datepalms_province_*` palette, and shows an info popup for the exact polygon you clicked—no more blue tiles or missing popups. You can still expose the app with the Cloudflare tunnel if you need a shareable link.
+
 ## 0.75) Prebuild simplified Date Palm Fields (optional)
 
 Before launching v9, cache the simplified per-province GeoJSONs so the dashboard can load them instantly when zoomed out:
@@ -105,9 +115,9 @@ If you want globally unique IDs for each field plus a province ID lookup, normal
 source .venv/bin/activate
 python scripts/normalize_provinces.py \
   --dir /datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_per_province \
-  --mapping datepalms_province_ids.json
+  --mapping datepalms_provinces.json
 ```
-Each rewritten `.gpkg` now contains `field_id`, `province_id`, and `esti_tree_number`, and you can reference `datepalms_province_ids.json` (which maps each `province_id` to the province name) elsewhere in the dashboard.
+Each rewritten `.gpkg` now contains `field_id`, `province_id`, and `esti_tree_number`, where `esti_tree_number` is computed as `round(area_m2 / 100 * 0.73)` so the value remains an integer. You can reference `datepalms_provinces.json` (which maps each `province_id` to the province name) elsewhere in the dashboard.
 
 
 ## 2) Add your sensors

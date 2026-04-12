@@ -17,7 +17,7 @@ def load_province_files(src_dir: Path) -> list[Path]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Normalize per-province GPKGs")
     parser.add_argument("--dir", "-d", type=Path, required=True, help="Directory containing province GPKGs")
-    parser.add_argument("--mapping", "-m", type=Path, default=Path("province_mapping.json"), help="Output JSON mapping file")
+    parser.add_argument("--mapping", "-m", type=Path, default=Path("datepalms_provinces.json"), help="Output JSON mapping file")
     args = parser.parse_args()
 
     if not args.dir.is_dir():
