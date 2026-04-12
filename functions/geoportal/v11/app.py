@@ -24,7 +24,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional, Tuple, List, Sequence
 from urllib.parse import urlparse
-from urllib.request import urlopen, urlretrieve
+from urllib.request import urlretrieve
 
 import geopandas as gpd
 import solara
@@ -46,7 +46,7 @@ from functions.geoportal.v11.layers import (
 from functions.geoportal.v11.widgets import use_debounce
 from functions.geoportal.v11.errors import Toast, use_toast
 from functions.geoportal.v11.geojson_loader import load_icon_group_from_geojson
-from functions.geoportal.v11.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget, TimeSeriesFigure
+from functions.geoportal.v11.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget
 from functions.geoportal.v11.center_pivot_loader import build_center_pivot_layer
 from shapely.geometry import mapping, box
 
@@ -387,8 +387,6 @@ def Page():
     province_names = solara.use_memo(list_date_palm_provinces, [])
     selected_date_palm_province, set_selected_date_palm_province = solara.use_state(None)
     date_palm_tile_layers, set_date_palm_tile_layers = solara.use_state({})
-    test_geo_province, set_test_geo_province = solara.use_state(None)
-    test_mode_state = solara.use_ref(None)
     def _create_field_lookup():
         try:
             return FieldLookup(
@@ -557,65 +555,30 @@ def Page():
 
     solara.use_effect(_lookup_hover_field_info, [hover_point, active_product, field_lookup])
 
-    def _province_gpkg_source(province: str) -> tuple[Path | None, str | None]:
+    def _province_geojson_source(province: str) -> tuple[Path | None, str | None]:
         if not province:
             return None, None
         base_dir = Path(getattr(CFG, "datepalms_province_dir", ""))
-        local = base_dir / f"{province}.gpkg" if base_dir else None
+        local = base_dir / f"{province}.geojson" if base_dir else None
         http_base = getattr(CFG, "datepalms_province_http_base", "").rstrip("/")
-        remote = f"{http_base}/{province}.gpkg" if http_base else None
+        remote = f"{http_base}/{province}.geojson" if http_base else None
         return (local if local and local.exists() else None), remote
 
-    def _province_geojson_url(province: str) -> str | None:
-        http_base = getattr(CFG, "datepalms_province_http_base", "").rstrip("/")
-        if not http_base:
-            return None
-        return f"{http_base}/{province}.geojson"
-
-    def _bounds_to_bbox(bounds: list | tuple | None) -> tuple[float, float, float, float] | None:
-        if not bounds or len(bounds) != 2:
-            return None
-        south, west = bounds[0]
-        north, east = bounds[1]
-        try:
-            return float(west), float(south), float(east), float(north)
-        except Exception:
-            return None
-
-    def _download_remote_gpkg(url: str) -> Path | None:
-        if not url:
-            return None
-        parsed = urlparse(url)
-        if not parsed.path:
-            return None
-        target = _GPKG_TEMP_DIR / Path(parsed.path).name
-        if target.exists():
-            return target
-        try:
-            urlretrieve(url, str(target))
-            return target
-        except Exception:
-            return None
-
-    def _read_province_gdf(
+    def _read_province_geojson(
         local_path: Path | None,
         remote_url: str | None,
-        bbox: tuple[float, float, float, float],
     ) -> gpd.GeoDataFrame | None:
         sources = []
+        if local_path and local_path.exists():
+            sources.append(str(local_path))
         if remote_url:
             sources.append(remote_url)
-        if local_path and local_path.exists():
-            sources.append(local_path)
         for src in sources:
-            actual_path = _download_remote_gpkg(src) if isinstance(src, str) else src
-            if not actual_path or not actual_path.exists():
-                continue
             try:
-                gdf = gpd.read_file(str(actual_path), bbox=bbox)
+                gdf = gpd.read_file(src)
                 return gdf
             except Exception as exc:
-                print(f"[HIGHRES] failed to read {actual_path}: {exc}")
+                print(f"[HIGHRES] failed to read {src}: {exc}")
         return None
 
     def _tile_url_for_province(province: str) -> str:
@@ -746,8 +709,6 @@ def Page():
         if active_product == PRODUCT_DATEPALM_FIELDS:
             return
         _cleanup_highres_layer()
-        set_test_geo_province(None)
-        setattr(test_mode_state, "current", None)
         _clear_popups()
 
     solara.use_effect(_cleanup_on_product_change, [active_product])
@@ -1022,30 +983,6 @@ def Page():
                             style={"marginBottom": "0.35rem", "fontSize": "0.95rem"},
                         ),
                             _render_date_palm_province_buttons(),
-                            solara.Div(
-                                style={"marginTop": "0.5rem"},
-                                children=[
-                                    solara.Button(
-                                        "Test Tabuk (geo)",
-                                        text=True,
-                                        on_click=lambda _event=None: (
-                                            _clear_popups(),
-                                            set_selected_date_palm_province("Tabuk"),
-                                            set_test_geo_province("Tabuk")
-                                        ),
-                                        style={"color": "#0f766e", "fontWeight": "600"},
-                                    ),
-                                    solara.Button(
-                                        "Clear Test Geo",
-                                        text=True,
-                                        on_click=lambda _event=None: (
-                                            _clear_popups(),
-                                            set_test_geo_province(None)
-                                        ),
-                                        style={"color": "#c026d3", "fontWeight": "600"},
-                                    ),
-                                ],
-                            ),
                         ],
                     ),
                 ],
@@ -1201,12 +1138,16 @@ def Page():
             active_product == PRODUCT_DATEPALM_FIELDS
             and selected_date_palm_province
             and selected_date_palm_province != PROVINCE_NATIONAL
-            and current_zoom >= HIGHRES_ZOOM_THRESHOLD
+            and current_zoom > 14
             and bbox is not None
         )
 
     def _highres_province() -> str | None:
-        return test_geo_province or selected_date_palm_province
+        if active_product != PRODUCT_DATEPALM_FIELDS:
+            return None
+        if not selected_date_palm_province or selected_date_palm_province == PROVINCE_NATIONAL:
+            return None
+        return selected_date_palm_province
 
     def _ensure_date_palm_tile_layer():
         should_show = (
@@ -1264,7 +1205,7 @@ def Page():
         ],
     )
 
-    HIGHRES_ZOOM_THRESHOLD = int(getattr(CFG, "datepalms_highres_zoom_threshold", 15))
+    HIGHRES_ZOOM_THRESHOLD = 15
 
     def _build_highres_display_style():
         return {
@@ -1275,45 +1216,21 @@ def Page():
         }
 
     def _maybe_load_highres_layer():
-        _clear_popups()
         target_province = _highres_province()
         bbox = _bounds_to_bbox(getattr(m, "bounds", None))
-        if test_geo_province and current_zoom < HIGHRES_ZOOM_THRESHOLD:
-            _cleanup_highres_layer()
-            highres_request_ref.current = None
-            if test_mode_state.current != "tile":
-                test_mode_state.current = "tile"
-                show_toast("Showing tiles, interactive tool deactivate", "info")
-            return
+
         should_display = (
             bool(target_province)
-            and current_zoom >= HIGHRES_ZOOM_THRESHOLD
+            and current_zoom > 14
             and bbox is not None
-            and (
-                test_geo_province
-                or (
-                    active_product == PRODUCT_DATEPALM_FIELDS
-                    and selected_date_palm_province
-                    and selected_date_palm_province != PROVINCE_NATIONAL
-                )
-            )
         )
+
         if not should_display:
             _cleanup_highres_layer()
             highres_request_ref.current = None
             return
-        if test_geo_province and test_mode_state.current != "geo":
-            test_mode_state.current = "geo"
-            show_toast(
-                "Showing geojson now, interactive tool active. Please click polygons to check attribute information",
-                "info",
-            )
 
         _cleanup_date_palm_tile_layers()
-
-        bbox = _bounds_to_bbox(getattr(m, "bounds", None))
-        if not bbox:
-            return
 
         province_to_load = target_province
         request_key = (province_to_load, bbox)
@@ -1322,34 +1239,19 @@ def Page():
 
         _cleanup_highres_layer()
 
-        local_path, remote_url = _province_gpkg_source(province_to_load)
+        local_path, remote_url = _province_geojson_source(province_to_load)
         if not local_path and not remote_url:
             show_toast(
-                f"No GeoPackage configured for province {selected_date_palm_province}",
+                f"No GeoJSON configured for province {province_to_load}",
                 "warning",
             )
             return
 
-        use_geojson = bool(test_geo_province)
-        if use_geojson:
-            geojson_url = _province_geojson_url(province_to_load)
-            source_label = geojson_url
-        else:
-            source_label = remote_url or (local_path and str(local_path))
-        if use_geojson:
-            if not geojson_url:
-                show_toast(f"No GeoJSON source for {province_to_load}", "warning")
-                return
-            try:
-                gdf = gpd.read_file(geojson_url)
-            except Exception as exc:
-                show_toast(f"Failed to read GeoJSON {geojson_url}: {exc}", "error")
-                return
-        else:
-            gdf = _read_province_gdf(local_path, remote_url, bbox)
+        gdf = _read_province_geojson(local_path, remote_url)
         if gdf is None:
-            show_toast(f"Failed to load {selected_date_palm_province} features.", "error")
+            show_toast(f"Failed to load {province_to_load} features.", "error")
             return
+
         if gdf.crs and gdf.crs.to_epsg() != 4326:
             try:
                 gdf = gdf.to_crs(4326)
@@ -1364,13 +1266,15 @@ def Page():
                 gdf = gdf[gdf.intersects(box(west, south, east, north))]
 
         if gdf.empty:
+            _cleanup_highres_layer()
+            highres_request_ref.current = None
             return
 
         data = json.loads(gdf.to_json())
         style = _build_highres_display_style()
         layer = ipyleaflet.GeoJSON(
             data=data,
-            name=f"{selected_date_palm_province} (geo)",
+            name=f"{province_to_load} (geo)",
             style=style,
             hover_style={
                 "fillColor": "salmon",
@@ -1393,8 +1297,6 @@ def Page():
             coords = None
             if isinstance(event, dict):
                 coords = event.get("coordinates")
-            if not coords and isinstance(feature, dict):
-                coords = kwargs.get("coordinates") or event.get("coordinates") if isinstance(event, dict) else None
             if not coords:
                 coords = kwargs.get("coordinates")
             normalized = _normalize_click_coords(coords)
@@ -1406,7 +1308,6 @@ def Page():
             show_popup(m, lat, lon, props, None, refs.active_marker_ref)
 
         layer.on_click(_on_click)
-        # keep the high-res layer on top of everything else so popups/highlight are visible
         if layer not in m.layers:
             m.add_layer(layer)
         set_highres_layer(layer)
