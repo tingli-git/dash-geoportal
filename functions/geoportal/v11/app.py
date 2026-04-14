@@ -332,8 +332,9 @@ def _product_summary(product: str):
         if total is not None:
             return solara.Markdown(
                 f"Total number of trees: {total}",
-                style={"marginTop": "0 rem", 
-                       "fontSize": "1.2rem",
+                style={"marginTop": "0.5 rem", 
+                       "fontSize": "1.2 rem",
+                       #"fontWeight": "600", 
                        "color": "#222"},
             )
     return solara.Div()
@@ -981,7 +982,8 @@ def Page():
                                 f"Total mapped date palm field acreage is {NATIONAL_COVERAGE_HA:,.2f} ha",
                                 style={
                                     "margin": "0",
-                                    "fontSize": "0.9rem",
+                                    "fontSize": "1.5 rem",
+                                    "fontWeight": "600",
                                     "color": "#475569",
                                     "whiteSpace": "nowrap",
                                 },
