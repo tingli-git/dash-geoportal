@@ -1117,8 +1117,8 @@ def Page():
         layer = ipyleaflet.VectorTileLayer(
             url=url,
             name=name,
-            min_zoom=0,
-            max_zoom=int(getattr(CFG, "datepalms_tiles_max_zoom", 14)),
+            min_zoom=5,
+            max_zoom=17,
             attribution="© local tiles",
             renderer="svg",
             interactive=True,
@@ -1157,10 +1157,6 @@ def Page():
         if not should_show:
             _cleanup_date_palm_tile_layers()
             return
-        if _should_use_highres():
-            _cleanup_date_palm_tile_layers()
-            return
-
         provinces = (
             list(province_names)
             if selected_date_palm_province == PROVINCE_NATIONAL
@@ -1229,8 +1225,6 @@ def Page():
             _cleanup_highres_layer()
             highres_request_ref.current = None
             return
-
-        _cleanup_date_palm_tile_layers()
 
         province_to_load = target_province
         request_key = (province_to_load, bbox)
@@ -1355,9 +1349,11 @@ def Page():
         center = getattr(m, "center", None) or (25.0, 45.0)
         location = (center[0], center[1]) if len(center) >= 2 else (25.0, 45.0)
         message = W.HTML(
-            "<div style='padding:0.35rem 0.5rem;font-weight:600;font-size:1.5rem;"
-            "background-color:rgba(255,255,255,0.5);border-radius:4px;'>"
-            "Loading geojson, please click a polygon to check attribute information."
+            "<div style='padding:0.35rem 0.75rem;font-weight:600;font-size:1.5rem;"
+            "background-color:rgba(255,255,255,0.5);border-radius:4px;display:flex;flex-direction:column;"
+            "gap:0.2rem;width:420px;'>"
+            "<span>Loading Geojson.</span>"
+            "<span style='font-size:1.35rem;font-weight:500;'>Click a polygon to check attribute information.</span>"
             "</div>"
         )
         popup = ipyleaflet.Popup(
@@ -1366,6 +1362,8 @@ def Page():
             close_button=True,
             auto_close=False,
             keep_in_view=False,
+            min_width=420,
+            max_width=520,
         )
         setattr(popup, "_is_geojson_hint", True)
 

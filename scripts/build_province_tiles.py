@@ -35,7 +35,7 @@ def _parse_args() -> argparse.Namespace:
         help="Destination directory for generated MBTiles.",
     )
     parser.add_argument("--min-zoom", type=int, default=5, help="Minimum zoom level for tiles.")
-    parser.add_argument("--max-zoom", type=int, default=16, help="Maximum zoom level for tiles.")
+    parser.add_argument("--max-zoom", type=int, default=17, help="Maximum zoom level for tiles.")
     parser.add_argument(
         "--force",
         action="store_true",
