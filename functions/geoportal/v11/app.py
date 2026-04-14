@@ -1068,8 +1068,6 @@ def Page():
         if _zmin is not None and m.zoom < _zmin:
             m.zoom = _zmin
 
-        show_toast(f"Tiles ready z∈[{_zmin},{_zmax}] • ext=.{ext}", "success")
-
     solara.use_effect(_on_tiles_folder_change, [debounced_raster_dir])
 
     # Raster overlay (single upsert)

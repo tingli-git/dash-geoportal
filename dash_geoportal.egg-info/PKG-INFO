@@ -119,6 +119,13 @@ python scripts/normalize_provinces.py \
 ```
 Each rewritten `.gpkg` now contains `field_id`, `province_id`, and `esti_tree_number`, where `esti_tree_number` is computed as `round(area_m2 / 100 * 0.73)` so the value remains an integer. You can reference `datepalms_provinces.json` (which maps each `province_id` to the province name) elsewhere in the dashboard.
 
+### 0.7) Export provinces to GeoJSON (v11)
+The v11 product prefers GeoJSON copies of each province file when pre-loaded data is needed. Run the new helper to dump every `.gpkg` from `datepalms_per_province` into `.geojson` files (by default it writes next to the sources, but `--output-dir` lets you pick another folder). Use `--force` to overwrite an existing GeoJSON and `--province <name>` to limit the conversion to a few provinces.
+```bash
+source .venv/bin/activate
+python scripts/convert_province_gpkg_to_geojson.py --province-dir /datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_per_province --output-dir /datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_per_province_geojson --force
+```
+
 
 ## 2) Add your sensors
 - Put your points in `data/sensors.geojson` (GeoJSON Point features).
