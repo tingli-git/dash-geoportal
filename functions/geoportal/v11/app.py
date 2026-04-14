@@ -982,7 +982,7 @@ def Page():
                                 f"Total mapped date palm field acreage is {NATIONAL_COVERAGE_HA:,.2f} ha",
                                 style={
                                     "margin": "0",
-                                    "fontSize": "1.5 rem",
+                                    "fontSize": "2 rem",
                                     "fontWeight": "600",
                                     "color": "#475569",
                                     "whiteSpace": "nowrap",
