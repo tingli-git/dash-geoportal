@@ -691,18 +691,40 @@ def Page():
         ensure_controls(m)  # adds LayersControl if missing
     solara.use_effect(_init_controls_effect, [])
 
-    def _ensure_ksa_layer():
-        nonlocal ksa_layer
-        if ksa_layer and (ksa_layer in m.layers):
-            return
-        layer, err = build_ksa_bounds_layer(m=m)
-        if err:
-            show_toast(err, "error")
-            return
-        ksa_layer = layer
-        _insert_after(layer, esri)
+    ksa_layer_normal, set_ksa_layer_normal = solara.use_state(None)
+    ksa_layer_area, set_ksa_layer_area = solara.use_state(None)
 
-    solara.use_effect(_ensure_ksa_layer, [m, esri])
+    def _init_ksa_layers():
+        if ksa_layer_normal is None:
+            layer, err = build_ksa_bounds_layer(m=m, show_area=False)
+            if err:
+                show_toast(err, "error")
+            else:
+                set_ksa_layer_normal(layer)
+
+        if ksa_layer_area is None:
+            layer, err = build_ksa_bounds_layer(m=m, show_area=True)
+            if err:
+                show_toast(err, "error")
+            else:
+                set_ksa_layer_area(layer)
+
+    solara.use_effect(_init_ksa_layers, [m])
+
+    def _sync_ksa_layer():
+        active_layer = ksa_layer_area if active_product == PRODUCT_DATEPALM_FIELDS else ksa_layer_normal
+        inactive_layer = ksa_layer_normal if active_product == PRODUCT_DATEPALM_FIELDS else ksa_layer_area
+
+        if inactive_layer and inactive_layer in m.layers:
+            try:
+                m.remove_layer(inactive_layer)
+            except Exception:
+                pass
+
+        if active_layer and active_layer not in m.layers:
+            _insert_after(active_layer, esri)
+
+    solara.use_effect(_sync_ksa_layer, [m, esri, active_product, ksa_layer_normal, ksa_layer_area])
 
 
     def _cleanup_on_product_change():
