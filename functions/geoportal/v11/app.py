@@ -934,6 +934,8 @@ def Page():
             },
         )
 
+    NATIONAL_COVERAGE_HA = 192_041.41
+
     def _render_date_palm_province_buttons():
         if not province_names:
             return solara.Markdown(
@@ -942,10 +944,11 @@ def Page():
             )
 
         buttons = []
-        buttons = []
         all_provinces = list(province_names) + [PROVINCE_NATIONAL]
+
         for province in all_provinces:
             is_active = selected_date_palm_province == province
+
             style_button = {
                 "minWidth": "190px",
                 "padding": "0.45rem 0.85rem",
@@ -956,15 +959,44 @@ def Page():
                 "fontWeight": "600" if is_active else "500",
                 "fontSize": "0.9rem",
             }
+
             label = PROVINCE_LABELS.get(province, province)
-            buttons.append(
-                solara.Button(
-                    label,
-                    text=True,
-                    style=style_button,
-                    on_click=lambda event=None, target=province: _on_date_palm_fields_province_click(target),
+
+            # Special rendering for NATIONAL
+            if province == PROVINCE_NATIONAL and is_active:
+                buttons.append(
+                    solara.Row(
+                        gap="0.35rem",
+                        style={"alignItems": "center"},
+                        children=[
+                            solara.Button(
+                                label,
+                                text=True,
+                                style=style_button,
+                                on_click=lambda event=None, target=province: _on_date_palm_fields_province_click(target),
+                            ),
+                            solara.Markdown(
+                                f"Total mapped date palm field acreage is {NATIONAL_COVERAGE_HA:,.2f} ha",
+                                style={
+                                    "margin": "0",
+                                    "fontSize": "0.9rem",
+                                    "color": "#475569",
+                                    "whiteSpace": "nowrap",
+                                },
+                            ),
+                        ],
+                    )
                 )
-            )
+            else:
+                buttons.append(
+                    solara.Button(
+                        label,
+                        text=True,
+                        style=style_button,
+                        on_click=lambda event=None, target=province: _on_date_palm_fields_province_click(target),
+                    )
+                )
+
         return solara.Div(
             children=buttons,
             style={
