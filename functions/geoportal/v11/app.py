@@ -332,7 +332,9 @@ def _product_summary(product: str):
         if total is not None:
             return solara.Markdown(
                 f"Total number of trees: {total}",
-                style={"marginTop": "0.5rem", "fontSize": "0.95rem", "color": "#222"},
+                style={"marginTop": "0 rem", 
+                       "fontSize": "1.2rem",
+                       "color": "#222"},
             )
     return solara.Div()
 
@@ -1870,16 +1872,11 @@ def Page():
             controls_widget = _product_controls(active_product) if active_product else None
             legend_items = []
             if active_product:
-                legend_items.append(
-                    solara.Markdown(
-                        f"**Active product:** {PRODUCT_LABELS.get(active_product)}",
-                        style={"margin": "0", "fontSize": "0.95rem"},
-                    )
-                )
                 legend_extra = _product_legend(active_product)
                 if legend_extra:
                     legend_items.append(legend_extra)
             legend_widget = solara.Column(children=legend_items) if legend_items else None
+            
             if legend_widget or controls_widget:
                 with solara.Row(
                     gap="1rem",
