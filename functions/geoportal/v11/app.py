@@ -772,6 +772,8 @@ def Page():
         try:
             for layer in list(m.layers):
                 if isinstance(layer, ipyleaflet.Popup):
+                    if getattr(layer, "_is_geojson_hint", False):
+                        continue
                     m.remove_layer(layer)
         except Exception:
             pass
@@ -1311,7 +1313,7 @@ def Page():
         set_highres_layer(layer)
         highres_request_ref.current = request_key
 
-    solara.use_effect(
+    solara.use_effect(  # noqa: SH104
         _maybe_load_highres_layer,
         [
             active_product,
@@ -1321,6 +1323,72 @@ def Page():
             raster_layer,
         ],
     )
+
+    geojson_hint_ref = solara.use_ref(None)
+    geojson_hint_shown_ref = solara.use_ref(False)
+
+    def _remove_geojson_hint():
+        popup = geojson_hint_ref.current
+        if popup and (popup in m.layers):
+            try:
+                m.remove_layer(popup)
+            except Exception:
+                pass
+        geojson_hint_ref.current = None
+
+    def _maybe_show_geojson_hint():
+        if active_product != PRODUCT_DATEPALM_FIELDS:
+            geojson_hint_shown_ref.current = False
+            _remove_geojson_hint()
+            return
+        if not selected_date_palm_province or selected_date_palm_province == PROVINCE_NATIONAL:
+            geojson_hint_shown_ref.current = False
+            _remove_geojson_hint()
+            return
+        zoom = getattr(m, "zoom", None)
+        if zoom is None or zoom < 15:
+            geojson_hint_shown_ref.current = False
+            _remove_geojson_hint()
+            return
+        if geojson_hint_shown_ref.current:
+            return
+        center = getattr(m, "center", None) or (25.0, 45.0)
+        location = (center[0], center[1]) if len(center) >= 2 else (25.0, 45.0)
+        message = W.HTML(
+            "<div style='padding:0.35rem 0.5rem;font-weight:600;font-size:1.5rem;"
+            "background-color:rgba(255,255,255,0.5);border-radius:4px;'>"
+            "Loading geojson, please click a polygon to check attribute information."
+            "</div>"
+        )
+        popup = ipyleaflet.Popup(
+            location=location,
+            child=message,
+            close_button=True,
+            auto_close=False,
+            keep_in_view=False,
+        )
+        setattr(popup, "_is_geojson_hint", True)
+
+        def _on_hint_close(*_):
+            geojson_hint_shown_ref.current = False
+            geojson_hint_ref.current = None
+
+        try:
+            popup.on_close(_on_hint_close)
+        except Exception:
+            pass
+        try:
+            m.add_layer(popup)
+        except Exception:
+            pass
+        geojson_hint_ref.current = popup
+        geojson_hint_shown_ref.current = True
+
+    solara.use_effect(  # noqa: SH104
+        _maybe_show_geojson_hint,
+        [active_product, selected_date_palm_province, current_zoom],
+    )
+    
     def _date_palm_hover_style():
         weight = float(getattr(CFG, "datepalms_province_hover_weight", 2.8))
         return {
