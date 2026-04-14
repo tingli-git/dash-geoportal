@@ -1,3 +1,8 @@
+# Updated ksa_bounds_loader.py with:
+# - caching (fast)
+# - separate name + area layers
+# - Tabuk-specific vertical offset
+
 from __future__ import annotations
 
 import json
@@ -13,6 +18,12 @@ from functions.geoportal.v11.config import CFG
 
 def _normalize_name(name: str) -> str:
     return "" if not name else name.replace(" ", "_").replace("-", "_").strip().lower()
+
+
+# -------- offsets (custom tweaks) --------
+OFFSET_OVERRIDES = {
+    "tabuk": -30,  # move 30px north
+}
 
 
 @lru_cache(maxsize=1)
@@ -105,16 +116,19 @@ def _build_geojson_cached() -> dict:
     return _build_geojson(_load_gdf_wgs84())
 
 
+# -------- label layers --------
+
 def _build_name_label_group(gdf: gpd.GeoDataFrame) -> ipyleaflet.LayerGroup:
     label_field = getattr(CFG, "ksa_bounds_label_field", "ADM1_EN")
     font_size = getattr(CFG, "ksa_bounds_label_font_size", "16px")
-    font_color = getattr(CFG, "ksa_bounds_label_color", "#535e79")
+    font_color = getattr(CFG, "ksa_bounds_label_color", "#1f273b")
     markers = []
 
     for _, row in gdf.iterrows():
         geom = row.get("geometry")
         if geom is None or geom.is_empty:
             continue
+
         centroid = geom.centroid
         if centroid.is_empty:
             continue
@@ -123,33 +137,34 @@ def _build_name_label_group(gdf: gpd.GeoDataFrame) -> ipyleaflet.LayerGroup:
         if not name:
             continue
 
+        name_norm = _normalize_name(name)
+        offset = OFFSET_OVERRIDES.get(name_norm, 0)
+
         html = (
             f"<div style="
             f"'font-size:{font_size};color:{font_color};font-weight:600;opacity:0.8;"
             "text-shadow:0 0 4px rgba(255,255,255,0.85);white-space:nowrap;"
-            "transform:translate(-50%,-50%);'"
-            f"<span>{name}</span>"
-            f"</div>"
+            f"transform:translate(-50%,-50%) translateY({offset}px);'"
+            f"><span>{name}</span></div>"
         )
+
         icon = ipyleaflet.DivIcon(html=html, icon_size=(0, 0))
         markers.append(ipyleaflet.Marker(location=(centroid.y, centroid.x), icon=icon))
 
-    return ipyleaflet.LayerGroup(
-        layers=markers,
-        name="KSA province names",
-    )
+    return ipyleaflet.LayerGroup(layers=markers, name="KSA province names")
 
 
 def _build_area_label_group(gdf: gpd.GeoDataFrame) -> ipyleaflet.LayerGroup:
     label_field = getattr(CFG, "ksa_bounds_label_field", "ADM1_EN")
     font_size = getattr(CFG, "ksa_bounds_label_font_size", "16px")
-    font_color = getattr(CFG, "ksa_bounds_label_color", "#535e79")
+    font_color = getattr(CFG, "ksa_bounds_label_color", "#1f273b")
     markers = []
 
     for _, row in gdf.iterrows():
         geom = row.get("geometry")
         if geom is None or geom.is_empty:
             continue
+
         centroid = geom.centroid
         if centroid.is_empty:
             continue
@@ -162,22 +177,26 @@ def _build_area_label_group(gdf: gpd.GeoDataFrame) -> ipyleaflet.LayerGroup:
         if not area_label:
             continue
 
+        name_norm = _normalize_name(name)
+        base_offset = 20
+        extra_offset = OFFSET_OVERRIDES.get(name_norm, 0)
+        total_offset = base_offset + extra_offset
+
         html = (
             f"<div style="
-            f"'font-size:{font_size};color:{font_color};font-weight:500;opacity:0.8;"
+            f"'font-size:{font_size};color:{font_color};font-weight:800;opacity:0.8;"
             "text-shadow:0 0 4px rgba(255,255,255,0.85);white-space:nowrap;"
-            "transform:translate(-50%,-50%) translateY(20px);'"
-            f"<span style='display:block;font-size:0.8rem;'>{area_label}</span>"
-            f"</div>"
+            f"transform:translate(-50%,-50%) translateY({total_offset}px);'"
+            f"><span style='display:block;font-size:0.8rem;'>{area_label}</span></div>"
         )
+
         icon = ipyleaflet.DivIcon(html=html, icon_size=(0, 0))
         markers.append(ipyleaflet.Marker(location=(centroid.y, centroid.x), icon=icon))
 
-    return ipyleaflet.LayerGroup(
-        layers=markers,
-        name="KSA field acreage",
-    )
+    return ipyleaflet.LayerGroup(layers=markers, name="KSA field acreage")
 
+
+# -------- main builder --------
 
 def build_ksa_bounds_layer(
     *,
@@ -215,4 +234,5 @@ def build_ksa_bounds_layer(
         layers=layers,
         name=getattr(CFG, "ksa_bounds_layer_name", "KSA bounds"),
     )
+
     return group, None
