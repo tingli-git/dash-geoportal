@@ -845,11 +845,11 @@ def Page():
         [m, active_product, selected_date_palm_province, national_figure_closed],
     )
 
-    def _sync_loading_popup():
-        popup = loading_popup_ref.current
-        if popup and (popup in m.layers):
+    def _sync_loading_badge_control():
+        control = loading_popup_ref.current
+        if control is not None:
             try:
-                m.remove_layer(popup)
+                m.remove_control(control)
             except Exception:
                 pass
             loading_popup_ref.current = None
@@ -857,33 +857,48 @@ def Page():
         if not loading_message:
             return
 
-        center = getattr(m, "center", None) or (25.0, 45.0)
-        location = (center[0], center[1]) if len(center) >= 2 else (25.0, 45.0)
-        body = W.HTML(
+        html = W.HTML(
             value=(
-                "<div style='padding:0.5rem 0.85rem;font-weight:700;font-size:1.1rem;"
-                "background-color:rgba(255,255,255,0.92);border-radius:8px;"
-                "color:#0f172a;min-width:220px;text-align:center;'>"
-                f"{loading_message}</div>"
+                "<div style='width:100%; min-width:900px; display:flex; justify-content:center;'>"
+                "<div style='"
+                "margin-top:12px;"
+                "background:rgba(255,255,255,0.06);"
+                "padding:12px 21px;"
+                "border-radius:15px;"
+                "border:1px solid rgba(148,163,184,0.65);"
+                "box-shadow:0 8px 20px rgba(15,23,42,0.16);"
+                "font-weight:700;"
+                "font-size:1.5rem;"
+                "color:#0f172a;"
+                "text-align:center;"
+                "min-width:270px;"
+                "'>"
+                f"{loading_message}"
+                "</div>"
+                "</div>"
             )
         )
-        popup = ipyleaflet.Popup(
-            location=location,
-            child=body,
-            close_button=False,
-            auto_close=False,
-            close_on_escape_key=False,
-            keep_in_view=False,
-            min_width=220,
-            max_width=260,
+
+        html.layout = W.Layout(
+            width="100%",
+            margin="0px",
+            padding="0px",
+            border="0",
         )
+
         try:
-            m.add_layer(popup)
-            loading_popup_ref.current = popup
+            html.add_class("loading-badge-widget")
         except Exception:
             pass
 
-    solara.use_effect(_sync_loading_popup, [m, loading_message])
+        control = ipyleaflet.WidgetControl(widget=html, position="topleft")
+        try:
+            m.add_control(control)
+            loading_popup_ref.current = control
+        except Exception:
+            pass
+
+    solara.use_effect(_sync_loading_badge_control, [m, loading_message])
 
     def _clear_finished_loading_message():
         if loading_message != "Loading Finished":
