@@ -813,7 +813,8 @@ def Page():
                 min_width="30vw",
                 max_width="30vw",
                 padding="10px",
-                border="1px solid rgba(148,163,184,0.75)",
+                border="1px solid rgba(148,163,184,0.45)",
+                background_color="rgba(255,255,255,0.45)",
             ),
         )
         try:
