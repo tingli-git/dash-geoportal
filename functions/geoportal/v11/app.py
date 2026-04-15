@@ -466,6 +466,8 @@ def Page():
     popup_watchers_attached = solara.use_ref(False)
     layer_signature_ref = solara.use_ref(None)
     field_density_legend_control_ref = solara.use_ref(None)
+    national_figure_control_ref = solara.use_ref(None)
+    national_figure_closed, set_national_figure_closed = solara.use_state(False)
 
     def _attach_map_debug():
         if map_debug_attached.current:
@@ -753,6 +755,87 @@ def Page():
             pass
 
     solara.use_effect(_sync_field_density_legend, [m, active_product])
+
+    def _sync_national_figure():
+        current = national_figure_control_ref.current
+        if current is not None:
+            try:
+                m.remove_control(current)
+            except Exception:
+                pass
+            national_figure_control_ref.current = None
+
+        should_show = (
+            active_product == PRODUCT_DATEPALM_FIELDS
+            and selected_date_palm_province == PROVINCE_NATIONAL
+            and not national_figure_closed
+        )
+        if not should_show:
+            return
+
+        figure_path = Path(getattr(CFG, "datepalms_national_figure_file", ""))
+        if not figure_path.exists():
+            return
+
+        try:
+            image_bytes = figure_path.read_bytes()
+        except Exception:
+            return
+
+        close_button = W.Button(
+            description="×",
+            layout=W.Layout(width="32px", height="32px", min_width="32px", padding="0"),
+            tooltip="Close figure",
+        )
+        close_button.style.button_color = "#ffffff"
+
+        def _close(_event):
+            set_national_figure_closed(True)
+
+        close_button.on_click(_close)
+
+        title = W.HTML(
+            value="<div style='font-size:12px;font-weight:700;color:#0f172a;'>Field acreage by province</div>"
+        )
+        header = W.HBox(
+            [title, close_button],
+            layout=W.Layout(justify_content="space-between", align_items="center", width="100%"),
+        )
+        image = W.Image(
+            value=image_bytes,
+            format="png",
+            layout=W.Layout(width="100%"),
+        )
+        panel = W.VBox(
+            [header, image],
+            layout=W.Layout(
+                width="30vw",
+                min_width="30vw",
+                max_width="30vw",
+                padding="10px",
+                border="1px solid rgba(148,163,184,0.75)",
+            ),
+        )
+        try:
+            panel.add_class("jupyter-widgets")
+            panel.layout.overflow = "hidden"
+        except Exception:
+            pass
+
+        control = ipyleaflet.WidgetControl(
+            widget=panel,
+            position="topleft",
+        )
+        try:
+            m.add_control(control)
+            national_figure_control_ref.current = control
+        except Exception:
+            pass
+
+    solara.use_effect(
+        _sync_national_figure,
+        [m, active_product, selected_date_palm_province, national_figure_closed],
+    )
 
     ksa_layer_normal, set_ksa_layer_normal = solara.use_state(None)
     ksa_layer_area, set_ksa_layer_area = solara.use_state(None)
@@ -1103,6 +1186,8 @@ def Page():
 
     def _on_date_palm_fields_province_click(target: str):
         _clear_popups()
+        if target == PROVINCE_NATIONAL:
+            set_national_figure_closed(False)
         set_selected_date_palm_province(target)
 
     def _product_controls(product: str):

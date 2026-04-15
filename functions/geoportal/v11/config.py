@@ -192,7 +192,7 @@ class Config:
     )
     field_density_layer_name: str = "Field density"
     field_density_default_opacity: float = 0.78
-    field_density_legend_title: str = "Date palm coverage (km<sup>2</sup> per 25 km<sup>2</sup> cell)"
+    field_density_legend_title: str = "Date palm coverage \n (km<sup>2</sup> per 25 km<sup>2</sup> cell)"
     field_density_legend: list[dict] = field(
         default_factory=lambda: [
             {"label": "0-0.1", "min": 0.0, "max": 0.1, "color": "#B7DBFF"},
@@ -202,6 +202,9 @@ class Config:
             {"label": "0.4-0.5", "min": 0.4, "max": 0.5, "color": "#EF5908"},
             {"label": "> 0.5", "min": 0.5, "max": None, "color": "#FA60E4"},
         ]
+    )
+    datepalms_national_figure_file: Path = Path(
+        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/Figs/FieldAcreageByProvince.png"
     )
 
 CFG = Config()
