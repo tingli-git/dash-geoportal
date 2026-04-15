@@ -458,9 +458,35 @@ def Page():
     field_density_legend_control_ref = solara.use_ref(None)
     national_figure_control_ref = solara.use_ref(None)
     national_figure_closed, set_national_figure_closed = solara.use_state(False)
-    loading_popup_ref = solara.use_ref(None)
     loading_message, set_loading_message = solara.use_state(None)
     loading_product_ref = solara.use_ref(None)
+
+
+    def _loading_badge():
+        if not loading_message:
+            return solara.Div()
+
+        return solara.Div(
+            style={
+                "position": "absolute",
+                "top": "16px",
+                "left": "50%",
+                "transform": "translateX(-50%)",
+                "zIndex": "1000",
+                "background": "rgba(255,255,255,0.96)",
+                "padding": "12px 21px",
+                "borderRadius": "15px",
+                "border": "1px solid rgba(148,163,184,0.65)",
+                "boxShadow": "0 8px 20px rgba(15,23,42,0.16)",
+                "fontWeight": "700",
+                "fontSize": "1.5rem",
+                "color": "#0f172a",
+                "textAlign": "center",
+                "minWidth": "270px",
+                "pointerEvents": "none",
+            },
+            children=[solara.Text(str(loading_message))],
+        )
 
     def _attach_map_debug():
         if map_debug_attached.current:
@@ -845,79 +871,7 @@ def Page():
         [m, active_product, selected_date_palm_province, national_figure_closed],
     )
 
-    def _sync_loading_badge_control():
-        control = loading_popup_ref.current
-        if control is not None:
-            try:
-                m.remove_control(control)
-            except Exception:
-                pass
-            loading_popup_ref.current = None
 
-        if not loading_message:
-            return
-
-        html = W.HTML(
-            value=(
-                "<div style='width:100%; min-width:900px; display:flex; justify-content:center;'>"
-                "<div style='"
-                "margin-top:12px;"
-                "background:rgba(255,255,255,0.06);"
-                "padding:12px 21px;"
-                "border-radius:15px;"
-                "border:1px solid rgba(148,163,184,0.65);"
-                "box-shadow:0 8px 20px rgba(15,23,42,0.16);"
-                "font-weight:700;"
-                "font-size:1.5rem;"
-                "color:#0f172a;"
-                "text-align:center;"
-                "min-width:270px;"
-                "'>"
-                f"{loading_message}"
-                "</div>"
-                "</div>"
-            )
-        )
-
-        html.layout = W.Layout(
-            width="100%",
-            margin="0px",
-            padding="0px",
-            border="0",
-        )
-
-        try:
-            html.add_class("loading-badge-widget")
-        except Exception:
-            pass
-
-        control = ipyleaflet.WidgetControl(widget=html, position="topleft")
-        try:
-            m.add_control(control)
-            loading_popup_ref.current = control
-        except Exception:
-            pass
-
-    solara.use_effect(_sync_loading_badge_control, [m, loading_message])
-
-    def _clear_finished_loading_message():
-        if loading_message != "Loading Finished":
-            return
-
-        def _clear():
-            if loading_message == "Loading Finished":
-                set_loading_message(None)
-                loading_product_ref.current = None
-
-        try:
-            import threading
-            timer = threading.Timer(1.2, _clear)
-            timer.daemon = True
-            timer.start()
-        except Exception:
-            pass
-
-    solara.use_effect(_clear_finished_loading_message, [loading_message])
 
     ksa_layer_normal, set_ksa_layer_normal = solara.use_state(None)
     ksa_layer_area, set_ksa_layer_area = solara.use_state(None)
@@ -2241,7 +2195,14 @@ def Page():
             if summary_widget:
                 summary_widget
 
-        solara.display(m)
+        with solara.Div(
+            style={
+                "position": "relative",
+                "width": "100%",
+            }
+        ):
+            solara.display(m)
+            _loading_badge()
         ## turn off if not showing the time sereis at the map window bottom
         #if ts_df is not None:
         #    with solara.Column(style={"width": "100%"}):
