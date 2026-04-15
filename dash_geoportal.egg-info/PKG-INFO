@@ -11,8 +11,10 @@ Requires-Dist: geopandas>=1.1.1
 Requires-Dist: ipyleaflet>=0.20.0
 Requires-Dist: matplotlib>=3.10.7
 Requires-Dist: pandas>=2.3.3
+Requires-Dist: pillow>=11.3.0
 Requires-Dist: plotly>=6.3.1
 Requires-Dist: pyproj>=3.7.2
+Requires-Dist: rasterio>=1.4.3
 Requires-Dist: rioxarray>=0.20.0
 Requires-Dist: seaborn>=0.13.2
 Requires-Dist: solara==1.54.0

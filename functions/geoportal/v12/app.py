@@ -968,6 +968,23 @@ def Page():
             set_loading_message(None)
             loading_product_ref.current = None
 
+
+    def _finish_loading_date_palm_fields_when_ui_ready():
+        if active_product != PRODUCT_DATEPALM_FIELDS:
+            return
+        if loading_product_ref.current != PRODUCT_DATEPALM_FIELDS:
+            return
+        # Default subproduct UI for Date Palm Fields is ready once the controls
+        # are mounted: product controls can render and province names exist.
+        controls_ready = bool(province_names)
+        if controls_ready:
+            _finish_loading(PRODUCT_DATEPALM_FIELDS)
+
+    solara.use_effect(
+        _finish_loading_date_palm_fields_when_ui_ready,
+        [active_product, province_names],
+    )
+
     def _maybe_fit_product(product: str, bounds):
         print(f"[DEBUG fit request] pending={pending_fit_product.current} active={active_product} target={product} bounds_set={bounds is not None}")
         if pending_fit_product.current != product:
