@@ -54,6 +54,7 @@ from functions.geoportal.v11.datepalm_loader import build_datepalms_layer  # NEW
 from functions.geoportal.v11.ksa_bounds_loader import build_ksa_bounds_layer
 from functions.geoportal.v11.tree_health_loader import build_tree_health_layer, clear_tree_health_highlight
 from functions.geoportal.v11.datepalm_province_loader import list_date_palm_provinces
+from functions.geoportal.v11.field_density_loader import build_field_density_layer
 from functions.geoportal.v11.lookup import FieldLookup
 from functions.geoportal.v11.popups import show_popup
 from functions.geoportal.v11.utils import html_table_popup
@@ -81,6 +82,7 @@ TILES_HTTP_BASE: str = getattr(CFG, "tiles_http_base", "http://127.0.0.1:8766")
 PRODUCT_TREE_VEGE = "tree_vege"
 PRODUCT_DATEPALM = "datepalm"
 PRODUCT_DATEPALM_FIELDS = "datepalm_fields"
+PRODUCT_FIELD_DENSITY = "field_density"
 PRODUCT_TREE_HEALTH = "tree_health"
 PRODUCT_SENSORS = "sensors"
 PRODUCT_CENTER_PIVOT = "cpf"
@@ -90,6 +92,7 @@ PRODUCT_ORDER = [
     PRODUCT_SENSORS,
     PRODUCT_CENTER_PIVOT,
     PRODUCT_DATEPALM_FIELDS,
+    PRODUCT_FIELD_DENSITY,
     PRODUCT_DATEPALM,
     PRODUCT_TREE_VEGE,
 ]
@@ -98,6 +101,7 @@ PRODUCT_LABELS = {
     PRODUCT_TREE_VEGE: "Tree–Vege–NonVege Classification",
     PRODUCT_DATEPALM: "Date Palm Fields Qassim Manual",
     PRODUCT_DATEPALM_FIELDS: "Date Palm Fields",
+    PRODUCT_FIELD_DENSITY: "Field density",
     PRODUCT_TREE_HEALTH: "Tree Health",
     PRODUCT_SENSORS: "Sensors in AlDka",
     PRODUCT_CENTER_PIVOT: "Center-Pivot Fields",
@@ -112,6 +116,7 @@ PRODUCT_DEFAULT_ZOOM = {
     PRODUCT_TREE_HEALTH: 16,
     PRODUCT_SENSORS: 16,
     PRODUCT_DATEPALM_FIELDS: 6,
+    PRODUCT_FIELD_DENSITY: 6,
 }
 
 
@@ -285,12 +290,39 @@ def _tree_health_badges():
     )
 
 
+def _field_density_legend_widget() -> W.HTML:
+    rows = []
+    for item in getattr(CFG, "field_density_legend", []):
+        color = str(item.get("color", "#000000"))
+        label = str(item.get("label", ""))
+        rows.append(
+            (
+                "<div style='display:flex;align-items:center;gap:8px;margin-top:6px;'>"
+                f"<span style='width:16px;height:16px;border-radius:4px;border:1px solid rgba(15,23,42,0.18);background:{color};display:inline-block;'></span>"
+                f"<span style='font-size:12px;color:#0f172a;'>{label}</span>"
+                "</div>"
+            )
+        )
+    title = str(getattr(CFG, "field_density_legend_title", "Field density"))
+    html = (
+        "<div style='background:rgba(255,255,255,0.96);border:1px solid rgba(148,163,184,0.75);"
+        "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;'>"
+        f"<div style='font-size:13px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
+        "<div style='font-size:11px;color:#475569;margin-top:4px;'>0 values remain transparent.</div>"
+        f"{''.join(rows)}"
+        "</div>"
+    )
+    return W.HTML(value=html)
+
+
 def _product_legend(product: str):
     if product == PRODUCT_TREE_VEGE:
         return _legend_inline_row()
     if product == PRODUCT_TREE_HEALTH:
         return _tree_health_badges()
     if product == PRODUCT_DATEPALM_FIELDS:
+        return solara.Div()
+    if product == PRODUCT_FIELD_DENSITY:
         return solara.Div()
     if product == PRODUCT_DATEPALM:
         return solara.Markdown(
@@ -416,6 +448,9 @@ def Page():
     dp_layer_full, set_dp_layer_full = solara.use_state(None)
     dp_layer_simple, set_dp_layer_simple = solara.use_state(None)
     dp_active_layer_ref = solara.use_ref(None)
+    field_density_opacity, set_field_density_opacity = solara.use_state(
+        float(getattr(CFG, "field_density_default_opacity", 0.78))
+    )
 
     # --- Tree Health state ---
     th_opacity, set_th_opacity = solara.use_state(float(getattr(CFG, "tree_health_fill_opacity", 0.75)))
@@ -430,6 +465,7 @@ def Page():
     current_zoom, set_current_zoom = solara.use_state(getattr(CFG, "map_zoom", 6))
     popup_watchers_attached = solara.use_ref(False)
     layer_signature_ref = solara.use_ref(None)
+    field_density_legend_control_ref = solara.use_ref(None)
 
     def _attach_map_debug():
         if map_debug_attached.current:
@@ -693,6 +729,30 @@ def Page():
         ensure_base_layers(m, osm, esri)
         ensure_controls(m)  # adds LayersControl if missing
     solara.use_effect(_init_controls_effect, [])
+
+    def _sync_field_density_legend():
+        current = field_density_legend_control_ref.current
+        if current is not None:
+            try:
+                m.remove_control(current)
+            except Exception:
+                pass
+            field_density_legend_control_ref.current = None
+
+        if active_product != PRODUCT_FIELD_DENSITY:
+            return
+
+        control = ipyleaflet.WidgetControl(
+            widget=_field_density_legend_widget(),
+            position="bottomright",
+        )
+        try:
+            m.add_control(control)
+            field_density_legend_control_ref.current = control
+        except Exception:
+            pass
+
+    solara.use_effect(_sync_field_density_legend, [m, active_product])
 
     ksa_layer_normal, set_ksa_layer_normal = solara.use_state(None)
     ksa_layer_area, set_ksa_layer_area = solara.use_state(None)
@@ -1047,6 +1107,19 @@ def Page():
                     ),
                 ],
             )
+        if product == PRODUCT_FIELD_DENSITY:
+            return solara.Row(
+                gap="0.5rem",
+                style=base_style,
+                children=[
+                    solara.Div(
+                        style={"width": "260px"},
+                        children=[
+                            _slider_float("Opacity", field_density_opacity, set_field_density_opacity, 0.0, 1.0, 0.01)
+                        ],
+                    )
+                ],
+            )
         if product == PRODUCT_DATEPALM:
             return solara.Row(
                 gap="0.5rem",
@@ -1167,6 +1240,40 @@ def Page():
     solara.use_effect(_render_raster_layer, [m, raster_layer, active_product, tile_bounds])
     solara.use_effect(lambda: (raster_layer and set_layer_opacity(raster_layer, raster_opacity)),
                       [raster_layer, raster_opacity])
+
+    field_density_layer, field_density_bounds, field_density_error = solara.use_memo(
+        lambda: build_field_density_layer(opacity=field_density_opacity),
+        [field_density_opacity],
+    )
+
+    def _render_field_density_layer():
+        layer_name = str(getattr(CFG, "field_density_layer_name", "Field density"))
+        if active_product == PRODUCT_FIELD_DENSITY:
+            if field_density_error:
+                show_toast(field_density_error, "error")
+                return
+            if field_density_layer is None:
+                return
+            upsert_overlay_by_name(m, field_density_layer, below_markers=True)
+            _maybe_fit_product(PRODUCT_FIELD_DENSITY, field_density_bounds)
+            return
+
+        for layer in list(m.layers):
+            if getattr(layer, "name", "") != layer_name:
+                continue
+            try:
+                m.remove_layer(layer)
+            except Exception:
+                pass
+
+    solara.use_effect(
+        _render_field_density_layer,
+        [m, active_product, field_density_layer, field_density_bounds, field_density_error],
+    )
+    solara.use_effect(
+        lambda: (field_density_layer and set_layer_opacity(field_density_layer, field_density_opacity)),
+        [field_density_layer, field_density_opacity],
+    )
 
     def _build_tile_layer(province: str, style_config: dict[str, str]) -> ipyleaflet.VectorTileLayer:
         url = _tile_url_for_province(province)

@@ -186,5 +186,21 @@ class Config:
     datepalms_tile_base_url: str = "http://127.0.0.1:8766/datepalms_tiles"
     datepalms_tile_url_template: str = "{base}/{province}/{z}/{x}/{y}.pbf"
     datepalms_tiles_max_zoom: int = 16
+    field_density_dir: Path = Path(
+        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_density"
+    )
+    field_density_layer_name: str = "Field density"
+    field_density_default_opacity: float = 0.78
+    field_density_legend_title: str = "Date palm coverage (km2 per 25 km2 cell)"
+    field_density_legend: list[dict] = field(
+        default_factory=lambda: [
+            {"label": "0-0.1", "min": 0.0, "max": 0.1, "color": "#B7DBFF"},
+            {"label": "0.1-0.2", "min": 0.1, "max": 0.2, "color": "#3E9CFE"},
+            {"label": "0.2-0.3", "min": 0.2, "max": 0.3, "color": "#48F882"},
+            {"label": "0.3-0.4", "min": 0.3, "max": 0.4, "color": "#E2DC38"},
+            {"label": "0.4-0.5", "min": 0.4, "max": 0.5, "color": "#EF5908"},
+            {"label": "> 0.5", "min": 0.5, "max": None, "color": "#FA60E4"},
+        ]
+    )
 
 CFG = Config()
