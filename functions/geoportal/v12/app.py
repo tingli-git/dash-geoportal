@@ -458,8 +458,9 @@ def Page():
     field_density_legend_control_ref = solara.use_ref(None)
     national_figure_control_ref = solara.use_ref(None)
     national_figure_closed, set_national_figure_closed = solara.use_state(False)
-    field_loading_popup_ref = solara.use_ref(None)
-    field_loading_message, set_field_loading_message = solara.use_state(None)
+    loading_popup_ref = solara.use_ref(None)
+    loading_message, set_loading_message = solara.use_state(None)
+    loading_product_ref = solara.use_ref(None)
 
     def _attach_map_debug():
         if map_debug_attached.current:
@@ -844,16 +845,16 @@ def Page():
         [m, active_product, selected_date_palm_province, national_figure_closed],
     )
 
-    def _sync_field_loading_popup():
-        popup = field_loading_popup_ref.current
+    def _sync_loading_popup():
+        popup = loading_popup_ref.current
         if popup and (popup in m.layers):
             try:
                 m.remove_layer(popup)
             except Exception:
                 pass
-            field_loading_popup_ref.current = None
+            loading_popup_ref.current = None
 
-        if active_product != PRODUCT_DATEPALM_FIELDS or not field_loading_message:
+        if not loading_message:
             return
 
         center = getattr(m, "center", None) or (25.0, 45.0)
@@ -863,7 +864,7 @@ def Page():
                 "<div style='padding:0.5rem 0.85rem;font-weight:700;font-size:1.1rem;"
                 "background-color:rgba(255,255,255,0.92);border-radius:8px;"
                 "color:#0f172a;min-width:220px;text-align:center;'>"
-                f"{field_loading_message}</div>"
+                f"{loading_message}</div>"
             )
         )
         popup = ipyleaflet.Popup(
@@ -878,11 +879,30 @@ def Page():
         )
         try:
             m.add_layer(popup)
-            field_loading_popup_ref.current = popup
+            loading_popup_ref.current = popup
         except Exception:
             pass
 
-    solara.use_effect(_sync_field_loading_popup, [m, active_product, field_loading_message])
+    solara.use_effect(_sync_loading_popup, [m, loading_message])
+
+    def _clear_finished_loading_message():
+        if loading_message != "Loading Finished":
+            return
+
+        def _clear():
+            if loading_message == "Loading Finished":
+                set_loading_message(None)
+                loading_product_ref.current = None
+
+        try:
+            import threading
+            timer = threading.Timer(1.2, _clear)
+            timer.daemon = True
+            timer.start()
+        except Exception:
+            pass
+
+    solara.use_effect(_clear_finished_loading_message, [loading_message])
 
     ksa_layer_normal, set_ksa_layer_normal = solara.use_state(None)
     ksa_layer_area, set_ksa_layer_area = solara.use_state(None)
@@ -973,6 +993,11 @@ def Page():
         pending_fit_product.current = product
         refs.did_fit_ref.current = False
         print(f"[DEBUG request_fit] product={product}")
+
+    def _finish_loading(product: str):
+        if loading_product_ref.current == product:
+            set_loading_message(None)
+            loading_product_ref.current = None
 
     def _maybe_fit_product(product: str, bounds):
         print(f"[DEBUG fit request] pending={pending_fit_product.current} active={active_product} target={product} bounds_set={bounds is not None}")
@@ -1403,6 +1428,7 @@ def Page():
         if active_product == PRODUCT_TREE_VEGE:
             upsert_overlay_by_name(m, raster_layer, below_markers=True)
             _maybe_fit_product(PRODUCT_TREE_VEGE, tile_bounds)
+            _finish_loading(PRODUCT_TREE_VEGE)
         elif raster_layer in m.layers:
             try:
                 m.remove_layer(raster_layer)
@@ -1430,6 +1456,7 @@ def Page():
                 return
             upsert_overlay_by_name(m, field_density_layer, below_markers=True)
             _maybe_fit_product(PRODUCT_FIELD_DENSITY, field_density_bounds)
+            _finish_loading(PRODUCT_FIELD_DENSITY)
             return
 
         for layer in list(m.layers):
@@ -1529,7 +1556,7 @@ def Page():
                 _insert_after(layer, anchor)
 
         if selected_date_palm_province == PROVINCE_NATIONAL or current_zoom <= HIGHRES_ZOOM_THRESHOLD:
-            set_field_loading_message("Loading Finished")
+            _finish_loading(PRODUCT_DATEPALM_FIELDS)
 
     solara.use_effect(
         _ensure_date_palm_tile_layer,
@@ -1648,7 +1675,7 @@ def Page():
             m.add_layer(layer)
         set_highres_layer(layer)
         highres_request_ref.current = request_key
-        set_field_loading_message("Loading Finished")
+        _finish_loading(PRODUCT_DATEPALM_FIELDS)
 
     solara.use_effect(  # noqa: SH104
         _maybe_load_highres_layer,
@@ -1838,6 +1865,7 @@ def Page():
         if icon_group not in m.layers:
             m.add_layer(icon_group)
         _maybe_fit_product(PRODUCT_SENSORS, bounds)
+        _finish_loading(PRODUCT_SENSORS)
 
         try:
             if hasattr(icon_group, "z_index"):
@@ -1914,6 +1942,7 @@ def Page():
             _insert_after(cp_layer, raster_layer)
         roi_bounds = _roi_to_bounds(getattr(CFG, "center_pivot_default_roi", None))
         _maybe_fit_product(PRODUCT_CENTER_PIVOT, roi_bounds)
+        _finish_loading(PRODUCT_CENTER_PIVOT)
 
     solara.use_effect(
         _ensure_cp_layer,
@@ -2039,6 +2068,7 @@ def Page():
             _insert_after(desired, anchor)
         if desired:
             _maybe_fit_product(PRODUCT_DATEPALM, getattr(desired, "_bounds", None))
+            _finish_loading(PRODUCT_DATEPALM)
 
     solara.use_effect(_sync_datepalm_display, [
         active_product,
@@ -2089,6 +2119,7 @@ def Page():
         if th_layer not in m.layers:
             _insert_after(th_layer, anchor)
         _maybe_fit_product(PRODUCT_TREE_HEALTH, getattr(th_layer, "_bounds", None))
+        _finish_loading(PRODUCT_TREE_HEALTH)
 
     solara.use_effect(_ensure_th_layer, [active_product, dp_layer_full, dp_layer_simple, cp_layer, raster_layer, th_opacity])
 
@@ -2111,10 +2142,8 @@ def Page():
         if product == active_product:
             return
         _clear_popups()
-        if product == PRODUCT_DATEPALM_FIELDS:
-            set_field_loading_message("Data Loading ...")
-        elif product != PRODUCT_DATEPALM_FIELDS:
-            set_field_loading_message(None)
+        loading_product_ref.current = product
+        set_loading_message("Data Loading ...")
         if product != PRODUCT_DATEPALM_FIELDS:
             _request_fit(product)
         set_active_product(product)
