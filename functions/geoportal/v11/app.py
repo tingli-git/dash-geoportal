@@ -92,7 +92,6 @@ PRODUCT_ORDER = [
     PRODUCT_SENSORS,
     PRODUCT_CENTER_PIVOT,
     PRODUCT_DATEPALM_FIELDS,
-    PRODUCT_FIELD_DENSITY,
     PRODUCT_DATEPALM,
     PRODUCT_TREE_VEGE,
 ]
@@ -305,11 +304,12 @@ def _field_density_legend_widget() -> W.HTML:
         )
     title = str(getattr(CFG, "field_density_legend_title", "Field density"))
     html = (
+        #"<div style='padding-top:180px;background:transparent;'>"
         "<div style='background:rgba(255,255,255,0.96);border:1px solid rgba(148,163,184,0.75);"
-        "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;'>"
+        "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
         f"<div style='font-size:13px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
-        "<div style='font-size:11px;color:#475569;margin-top:4px;'>0 values remain transparent.</div>"
-        f"{''.join(rows)}"
+        #"<div style='font-size:11px;color:#475569;margin-top:4px;'>0 values remain transparent.</div>"
+        f"{''.join(rows)}</div>"
         "</div>"
     )
     return W.HTML(value=html)
@@ -744,7 +744,7 @@ def Page():
 
         control = ipyleaflet.WidgetControl(
             widget=_field_density_legend_widget(),
-            position="bottomright",
+            position="topright",
         )
         try:
             m.add_control(control)
@@ -999,6 +999,36 @@ def Page():
 
     NATIONAL_COVERAGE_HA = 192_041.41
 
+    def _render_date_palm_subproduct_buttons():
+        buttons = []
+        for product, label in (
+            (PRODUCT_DATEPALM_FIELDS, "Fields"),
+            (PRODUCT_FIELD_DENSITY, "Field density"),
+        ):
+            is_active = active_product == product
+            buttons.append(
+                solara.Button(
+                    label,
+                    text=True,
+                    on_click=lambda _event=None, target=product: _select_product(target),
+                    style={
+                        "padding": "0.35rem 0.8rem",
+                        "borderRadius": "999px",
+                        "border": "1px solid #cbd5f5",
+                        "background": "#0f766e" if is_active else "#f8fafc",
+                        "color": "#f8fafc" if is_active else "#0f172a",
+                        "fontWeight": "600",
+                        "fontSize": "0.88rem",
+                        "margin": "0",
+                    },
+                )
+            )
+        return solara.Row(
+            children=buttons,
+            gap="0.45rem",
+            style={"alignItems": "center", "flexWrap": "wrap", "marginBottom": "0.85rem"},
+        )
+
     def _render_date_palm_province_buttons():
         if not province_names:
             return solara.Markdown(
@@ -1090,7 +1120,25 @@ def Page():
                     )
                 ],
             )
-        if product == PRODUCT_DATEPALM_FIELDS:
+        if product in {PRODUCT_DATEPALM_FIELDS, PRODUCT_FIELD_DENSITY}:
+            mode_details = []
+            if product == PRODUCT_DATEPALM_FIELDS:
+                mode_details.append(
+                    solara.Markdown(
+                        "Province – select a province to load the fields",
+                        style={"marginBottom": "0.35rem", "fontSize": "0.95rem"},
+                    )
+                )
+                mode_details.append(_render_date_palm_province_buttons())
+            else:
+                mode_details.append(
+                    solara.Div(
+                        style={"width": "260px"},
+                        children=[
+                            _slider_float("Opacity", field_density_opacity, set_field_density_opacity, 0.0, 1.0, 0.01)
+                        ],
+                    )
+                )
             return solara.Row(
                 gap="0.5rem",
                 style={**base_style, "width": "100%"},
@@ -1099,25 +1147,13 @@ def Page():
                         style={"flex": "0 0 70%", "maxWidth": "70%"},
                         children=[
                             solara.Markdown(
-                                "Province – select a province to load the fields",
-                            style={"marginBottom": "0.35rem", "fontSize": "0.95rem"},
-                        ),
-                            _render_date_palm_province_buttons(),
+                                "Subproduct",
+                                style={"marginBottom": "0.3rem", "fontSize": "0.95rem"},
+                            ),
+                            _render_date_palm_subproduct_buttons(),
+                            *mode_details,
                         ],
                     ),
-                ],
-            )
-        if product == PRODUCT_FIELD_DENSITY:
-            return solara.Row(
-                gap="0.5rem",
-                style=base_style,
-                children=[
-                    solara.Div(
-                        style={"width": "260px"},
-                        children=[
-                            _slider_float("Opacity", field_density_opacity, set_field_density_opacity, 0.0, 1.0, 0.01)
-                        ],
-                    )
                 ],
             )
         if product == PRODUCT_DATEPALM:
@@ -1934,7 +1970,9 @@ def Page():
         set_active_product(product)
 
     def _product_button_style(product: str):
-        active = product == active_product
+        active = product == active_product or (
+            product == PRODUCT_DATEPALM_FIELDS and active_product == PRODUCT_FIELD_DENSITY
+        )
         base = {
             "borderRadius": "999px",
             "padding": "0.45rem 1.1rem",

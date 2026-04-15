@@ -185,13 +185,14 @@ class Config:
     # --- Date palm polygon 
     datepalms_tile_base_url: str = "http://127.0.0.1:8766/datepalms_tiles"
     datepalms_tile_url_template: str = "{base}/{province}/{z}/{x}/{y}.pbf"
-    datepalms_tiles_max_zoom: int = 16
+    datepalms_tiles_max_zoom: int = 17
+    # --- Field density
     field_density_dir: Path = Path(
         "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_density"
     )
     field_density_layer_name: str = "Field density"
     field_density_default_opacity: float = 0.78
-    field_density_legend_title: str = "Date palm coverage (km2 per 25 km2 cell)"
+    field_density_legend_title: str = "Date palm coverage (km<sup>2</sup> per 25 km<sup>2</sup> cell)"
     field_density_legend: list[dict] = field(
         default_factory=lambda: [
             {"label": "0-0.1", "min": 0.0, "max": 0.1, "color": "#B7DBFF"},
