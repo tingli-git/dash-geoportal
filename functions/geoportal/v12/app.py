@@ -820,8 +820,8 @@ def Page():
             layout=W.Layout(width="32px", height="32px", min_width="32px", padding="0"),
             tooltip="Close figure",
         )
-        close_button.style.button_color = "#ffffff"
-
+        #close_button.style.button_color = "#ffffff"
+        close_button.style.button_color = "transparent"
         def _close(_event):
             set_national_figure_closed(True)
 
@@ -839,6 +839,29 @@ def Page():
             format="png",
             layout=W.Layout(width="100%"),
         )
+        panel_html = W.HTML(
+            value="""
+                <style>
+                .national-figure-control.leaflet-control {
+                    background: transparent !important;
+                    border: none !important;
+                    box-shadow: none !important;
+                }
+                .national-figure-panel {
+                    width: 30vw;
+                    min-width: 30vw;
+                    max-width: 30vw;
+                    padding: 10px;
+                    border: 1px solid rgba(148,163,184,0.45);
+                    background: rgba(255,255,255,0.20);
+                    backdrop-filter: blur(6px);
+                    border-radius: 10px;
+                    box-sizing: border-box;
+                }
+                </style>
+                <div class="national-figure-panel"></div>
+                """
+            )
         panel = W.VBox(
             [header, image],
             layout=W.Layout(
@@ -851,7 +874,7 @@ def Page():
             ),
         )
         try:
-            panel.add_class("jupyter-widgets")
+            panel.add_class("national-figure-panel")
             panel.layout.overflow = "hidden"
         except Exception:
             pass
@@ -863,6 +886,10 @@ def Page():
         try:
             m.add_control(control)
             national_figure_control_ref.current = control
+        except Exception:
+            pass
+        try:
+            control.widget.add_class("national-figure-panel")
         except Exception:
             pass
 
@@ -2163,10 +2190,11 @@ def Page():
         return base
 
     with solara.Column(gap="0.75rem"):
+
         solara.Markdown("### 🌴 Geoportal for Date Palm Field Informatics")
 
-        with solara.Card("", style={"padding": "16px"}):
-            solara.Markdown("**Products**", style={"fontSize": "1.15rem"})
+        with solara.Card("", style={"padding": "6px"}):
+            solara.Markdown("**Products**", style={"fontSize": "1.3rem"})
             with solara.Row(
                 gap="0.5rem",
                 style={
@@ -2218,6 +2246,26 @@ def Page():
                 "width": "100%",
             }
         ):
+            solara.Style("""
+                .leaflet-top.leaflet-left .leaflet-control {
+                    background: transparent !important;
+                }
+
+                .leaflet-control .national-figure-panel {
+                    background: rgba(255,255,255,0.20) !important;
+                    backdrop-filter: blur(6px);
+                    border-radius: 10px;
+                    box-shadow: 0 8px 24px rgba(15,23,42,0.12);
+                }
+
+                .leaflet-control .widget-box.national-figure-panel {
+                    background: rgba(255,255,255,0.20) !important;
+                }
+
+                .leaflet-control .jupyter-widgets.national-figure-panel {
+                    background: rgba(255,255,255,0.20) !important;
+                }
+                """)
             solara.display(m)
             _loading_badge()
         ## turn off if not showing the time sereis at the map window bottom
