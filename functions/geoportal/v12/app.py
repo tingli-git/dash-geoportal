@@ -355,7 +355,7 @@ def _field_density_legend_widget() -> W.HTML:
         #"<div style='padding-top:180px;background:transparent;'>"
         "<div style='margin-top:1px;background:rgba(255,255,255,0.4);backdrop-filter: blur(6px);border:1px solid rgba(148,163,184,0.4);"
         "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
-        f"<div style='font-size:13px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
+        f"<div style='font-size:14px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
         #"<div style='font-size:11px;color:#475569;margin-top:4px;'>0 values remain transparent.</div>"
         f"{''.join(rows)}</div>"
         "</div>"
@@ -379,14 +379,14 @@ def _raster_legend_widget() -> W.HTML:
             (
                 "<div style='display:flex;align-items:center;gap:8px;margin-top:6px;'>"
                 f"<span style='width:16px;height:16px;border-radius:4px;border:1px solid rgba(15,23,42,0.18);background:{color};display:inline-block;'></span>"
-                f"<span style='font-size:12px;color:#0f172a;'>{label}</span>"
+                f"<span style='font-size:14px;font-weight:600,color:#0f172a;'>{label}</span>"
                 "</div>"
             )
         )
     title = str(getattr(CFG, "raster_legend_title", "Tree–Vege–Bare"))
     html = (
         "<div style='margin-top:1px;background:rgba(255,255,255,0.40);backdrop-filter: blur(6px);border:1px solid rgba(148,163,184,0.40);"
-        "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
+        "border-radius:1px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
         f"<div style='font-size:13px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
         f"{''.join(rows)}</div>"
     )
@@ -2392,6 +2392,22 @@ def Page():
         ):
             # Inject CSS overrides to make the Leaflet control panels semi-transparent and polished.
             solara.Style("""
+                .leaflet-top.leaflet-right {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: flex-end;
+                }
+
+                .leaflet-top.leaflet-right .leaflet-control-layers {
+                    order: 1;
+                    margin-bottom: 8px;
+                }
+
+                .leaflet-top.leaflet-right .leaflet-control:has(.raster-legend-panel),
+                .leaflet-top.leaflet-right .leaflet-control:has(.field-density-legend-panel),
+                .leaflet-top.leaflet-right .leaflet-control:has(.tree-health-legend-panel) {
+                    order: 2;
+                }
 
                 .leaflet-control .national-figure-panel {
                     background: rgba(255,255,255,0.20) !important;
