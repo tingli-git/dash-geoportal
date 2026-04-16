@@ -289,6 +289,54 @@ def _tree_health_badges():
     )
 
 
+def _tree_health_legend_widget():
+    healthy_color = str(getattr(CFG, "tree_health_color_healthy", "#66C2A5"))
+    infested_color = str(getattr(CFG, "tree_health_color_infested", "#D1495B"))
+    healthy_count = getattr(CFG, "tree_health_healthy_count", None)
+    infested_count = getattr(CFG, "tree_health_infested_count", None)
+    total_count = getattr(CFG, "tree_health_total_count", None)
+
+    healthy_label = f"Healthy{f' ({healthy_count})' if healthy_count is not None else ''}"
+    infested_label = f"Infested{f' ({infested_count})' if infested_count is not None else ''}"
+
+    html = f"""
+    <div style="
+        margin-top: 0px;
+        background: rgba(255,255,255,0.40);
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(148,163,184,0.4);
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(15,23,42,0.12);
+        padding: 12px 14px;
+        min-width: 190px;
+        display: inline-block;
+    ">
+        <div style="font-size:16px;font-weight:700;color:#0f172a;line-height:1.35;">
+            Tree Health
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+            <span style="width:16px;height:16px;border-radius:999px;border:1px solid rgba(15,23,42,0.18);background:{healthy_color};display:inline-block;"></span>
+            <span style="font-size:14px;color:#0f172a;">{healthy_label}</span>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+            <span style="width:16px;height:16px;border-radius:999px;border:1px solid rgba(15,23,42,0.18);background:{infested_color};display:inline-block;"></span>
+            <span style="font-size:14px;color:#0f172a;">{infested_label}</span>
+        </div>
+
+        {f'<div style="font-size:14px;font-weight:600;color:#0f172a;margin-top:10px;">Total number of trees: {total_count}</div>' if total_count is not None else ''}
+    </div>
+    """
+
+    panel = W.Box(
+        [W.HTML(value=html)],
+        layout=W.Layout(padding="0", margin="0")
+    )
+    panel.add_class("tree-health-legend-panel")
+    return panel
+
+
 def _field_density_legend_widget() -> W.HTML:
     rows = []
     for item in getattr(CFG, "field_density_legend", []):
@@ -305,7 +353,7 @@ def _field_density_legend_widget() -> W.HTML:
     title = str(getattr(CFG, "field_density_legend_title", "Field density"))
     html = (
         #"<div style='padding-top:180px;background:transparent;'>"
-        "<div style='background:rgba(255,255,255,0.96);border:1px solid rgba(148,163,184,0.75);"
+        "<div style='margin-top:52px;background:rgba(255,255,255,0.96);border:1px solid rgba(148,163,184,0.75);"
         "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
         f"<div style='font-size:13px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
         #"<div style='font-size:11px;color:#475569;margin-top:4px;'>0 values remain transparent.</div>"
@@ -333,7 +381,7 @@ def _raster_legend_widget() -> W.HTML:
         )
     title = str(getattr(CFG, "raster_legend_title", "Tree–Vege–Bare"))
     html = (
-        "<div style='background:rgba(255,255,255,0.96);border:1px solid rgba(148,163,184,0.75);"
+        "<div style='margin-top:52px;background:rgba(255,255,255,0.96);border:1px solid rgba(148,163,184,0.75);"
         "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
         f"<div style='font-size:13px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
         f"{''.join(rows)}</div>"
@@ -342,8 +390,6 @@ def _raster_legend_widget() -> W.HTML:
 
 
 def _product_legend(product: str):
-    if product == PRODUCT_TREE_HEALTH:
-        return _tree_health_badges()
     if product == PRODUCT_DATEPALM_FIELDS:
         return solara.Div()
     if product == PRODUCT_FIELD_DENSITY:
@@ -383,16 +429,6 @@ def _product_legend(product: str):
 
 
 def _product_summary(product: str):
-    if product == PRODUCT_TREE_HEALTH:
-        total = getattr(CFG, "tree_health_total_count", None)
-        if total is not None:
-            return solara.Markdown(
-                f"Total number of trees: {total}",
-                style={"marginTop": "0.5 rem", 
-                       "fontSize": "1.2 rem",
-                       #"fontWeight": "600", 
-                       "color": "#222"},
-            )
     return solara.Div()
 
 
@@ -481,6 +517,7 @@ def Page():
     layer_signature_ref = solara.use_ref(None)
     field_density_legend_control_ref = solara.use_ref(None)
     raster_legend_control_ref = solara.use_ref(None)
+    tree_health_legend_control_ref = solara.use_ref(None)
     national_figure_control_ref = solara.use_ref(None)
     national_figure_closed, set_national_figure_closed = solara.use_state(False)
     loading_message, set_loading_message = solara.use_state(None)
@@ -841,6 +878,36 @@ def Page():
             pass
 
     solara.use_effect(_sync_raster_legend, [m, active_product])
+
+    def _sync_tree_health_legend():
+        current = tree_health_legend_control_ref.current
+        if current is not None:
+            try:
+                m.remove_control(current)
+                print("[TREE LEGEND] removed old control")
+            except Exception as e:
+                print("[TREE LEGEND] remove failed:", e)
+            tree_health_legend_control_ref.current = None
+
+        print("[TREE LEGEND] active_product =", active_product)
+
+        if active_product != PRODUCT_TREE_HEALTH:
+            print("[TREE LEGEND] skipped")
+            return
+
+        control = ipyleaflet.WidgetControl(
+            widget=_tree_health_legend_widget(),
+            position="topright",
+            transparent_bg = True,
+        )
+        try:
+            m.add_control(control)
+            tree_health_legend_control_ref.current = control
+            print("[TREE LEGEND] added control")
+        except Exception as e:
+            print("[TREE LEGEND] add failed:", e)
+
+    solara.use_effect(_sync_tree_health_legend, [m, active_product])
 
     def _sync_national_figure():
         current = national_figure_control_ref.current
@@ -2312,9 +2379,6 @@ def Page():
         ):
             # Inject CSS overrides to make the Leaflet control panels semi-transparent and polished.
             solara.Style("""
-                .leaflet-top.leaflet-left .leaflet-control {
-                    background: transparent !important;
-                }
 
                 .leaflet-control .national-figure-panel {
                     background: rgba(255,255,255,0.20) !important;
@@ -2330,7 +2394,9 @@ def Page():
                 .leaflet-control .jupyter-widgets.national-figure-panel {
                     background: rgba(255,255,255,0.20) !important;
                 }
-                """)
+                
+                            
+            """)
             # Display the prebuilt interactive Leaflet/Folium map object.
             solara.display(m)
             # Overlay a loading indicator while product or map state is updating.
