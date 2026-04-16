@@ -1397,8 +1397,10 @@ def Page():
             style={
                 "display": "grid",
                 "gridTemplateColumns": "repeat(7, minmax(0, 1fr))",
-                "gap": "0.7rem",
-                "maxWidth": "920px",
+                "columnGap": "2rem",
+                "rowGap": "0.7rem",
+                #"maxWidth": "920px",
+                "width":"100%",
             },
         )
 
@@ -1447,11 +1449,11 @@ def Page():
                 style={**base_style, "width": "100%"},
                 children=[
                     solara.Div(
-                        style={"flex": "0 0 70%", "maxWidth": "70%"},
+                        style={"flex": "1 1 100%", "maxWidth": "100%", "width": "100%"},
                         children=[
                             solara.Markdown(
                                 "Subproduct",
-                                style={"marginBottom": "0.3rem", "fontSize": "1.0rem","fontWeight":"800","color":"#424345"},
+                                style={"marginBottom": "0.3rem", "fontSize": "1.0rem", "fontWeight": "800", "color": "#424345"},
                             ),
                             _render_date_palm_subproduct_buttons(),
                             *mode_details,
@@ -2360,6 +2362,8 @@ def Page():
             
             # Show controls and legend side-by-side when either one is available.
             if legend_widget or controls_widget:
+                has_legend = legend_widget is not None
+
                 with solara.Row(
                     gap="1rem",
                     style={
@@ -2370,7 +2374,11 @@ def Page():
                 ):
                     if controls_widget:
                         solara.Div(
-                            style={"flex": "0 0 70%", "maxWidth": "70%"},
+                            style={
+                                "flex": "0 0 70%" if has_legend else "1 1 100%",
+                                "maxWidth": "70%" if has_legend else "100%",
+                                "width": "100%" if not has_legend else None,
+                            },
                             children=[controls_widget],
                         )
                     if legend_widget:
@@ -2378,6 +2386,7 @@ def Page():
                             style={"flex": "0 0 30%", "maxWidth": "30%"},
                             children=[legend_widget],
                         )
+            
             # Render the product summary below the controls card when provided by the active product.
             summary_widget = _product_summary(active_product)
             if summary_widget:
