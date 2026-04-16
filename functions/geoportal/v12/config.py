@@ -51,7 +51,7 @@ class Config:
     # -----------------------------
     # Raster Legend Configuration
     # -----------------------------
-    raster_legend_title: str = "Tree–Vege–Bare"
+    raster_legend_title: str = "Tree–Vege–NonVege Classification"
     raster_legend_enabled: bool = True
     raster_legend: list[dict] = field(
         default_factory=lambda: [

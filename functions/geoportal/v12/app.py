@@ -315,9 +315,33 @@ def _field_density_legend_widget() -> W.HTML:
     return W.HTML(value=html)
 
 
+def _raster_legend_widget() -> W.HTML:
+    if not getattr(CFG, "raster_legend_enabled", True):
+        return W.HTML(value="<div></div>")
+
+    rows = []
+    for item in getattr(CFG, "raster_legend", []):
+        color = str(item.get("color", "#000000"))
+        label = str(item.get("name", ""))
+        rows.append(
+            (
+                "<div style='display:flex;align-items:center;gap:8px;margin-top:6px;'>"
+                f"<span style='width:16px;height:16px;border-radius:4px;border:1px solid rgba(15,23,42,0.18);background:{color};display:inline-block;'></span>"
+                f"<span style='font-size:12px;color:#0f172a;'>{label}</span>"
+                "</div>"
+            )
+        )
+    title = str(getattr(CFG, "raster_legend_title", "Tree–Vege–Bare"))
+    html = (
+        "<div style='background:rgba(255,255,255,0.96);border:1px solid rgba(148,163,184,0.75);"
+        "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
+        f"<div style='font-size:13px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
+        f"{''.join(rows)}</div>"
+    )
+    return W.HTML(value=html)
+
+
 def _product_legend(product: str):
-    if product == PRODUCT_TREE_VEGE:
-        return _legend_inline_row()
     if product == PRODUCT_TREE_HEALTH:
         return _tree_health_badges()
     if product == PRODUCT_DATEPALM_FIELDS:
@@ -456,6 +480,7 @@ def Page():
     popup_watchers_attached = solara.use_ref(False)
     layer_signature_ref = solara.use_ref(None)
     field_density_legend_control_ref = solara.use_ref(None)
+    raster_legend_control_ref = solara.use_ref(None)
     national_figure_control_ref = solara.use_ref(None)
     national_figure_closed, set_national_figure_closed = solara.use_state(False)
     loading_message, set_loading_message = solara.use_state(None)
@@ -788,6 +813,34 @@ def Page():
             pass
 
     solara.use_effect(_sync_field_density_legend, [m, active_product])
+
+    def _sync_raster_legend():
+        current = raster_legend_control_ref.current
+        if current is not None:
+            try:
+                m.remove_control(current)
+            except Exception:
+                pass
+            raster_legend_control_ref.current = None
+
+        should_show = (
+            active_product == PRODUCT_TREE_VEGE
+            and getattr(CFG, "raster_legend_enabled", True)
+        )
+        if not should_show:
+            return
+
+        control = ipyleaflet.WidgetControl(
+            widget=_raster_legend_widget(),
+            position="topright",
+        )
+        try:
+            m.add_control(control)
+            raster_legend_control_ref.current = control
+        except Exception:
+            pass
+
+    solara.use_effect(_sync_raster_legend, [m, active_product])
 
     def _sync_national_figure():
         current = national_figure_control_ref.current
@@ -1296,7 +1349,7 @@ def Page():
                 mode_details.append(
                     solara.Markdown(
                         "Province – select a province to load the fields",
-                        style={"marginBottom": "0.35rem", "fontSize": "0.95rem"},
+                        style={"marginBottom": "0.35rem", "fontSize": "0.95rem",'fontWeight':"800","color":"#424345"},
                     )
                 )
                 mode_details.append(_render_date_palm_province_buttons())
@@ -1318,7 +1371,7 @@ def Page():
                         children=[
                             solara.Markdown(
                                 "Subproduct",
-                                style={"marginBottom": "0.3rem", "fontSize": "0.95rem"},
+                                style={"marginBottom": "0.3rem", "fontSize": "1.0rem","fontWeight":"800","color":"#424345"},
                             ),
                             _render_date_palm_subproduct_buttons(),
                             *mode_details,
@@ -2189,12 +2242,15 @@ def Page():
             })
         return base
 
+    # Main vertical layout for the geoportal page: header, controls, map, and notifications.
     with solara.Column(gap="0.75rem"):
-
-        solara.Markdown("### 🌴 Geoportal for Date Palm Field Informatics")
-
-        with solara.Card("", style={"padding": "6px"}):
-            solara.Markdown("**Products**", style={"fontSize": "1.3rem"})
+        # Page title shown above the product controls.
+        solara.Markdown("### 🌴 Geoportal for Date Palm Field Informatics",
+                        style={"fontSize":"1.5rem","fontWeight":"700","color": "#272828",})
+        # Card groups the product picker and the widgets that depend on the active product.
+        with solara.Card("", style={"padding": "1px"}):
+            solara.Markdown("**Products**", style={"fontSize": "1.3rem","marginTop": "-20px","color":"#424345"})
+            # Product buttons let the user switch between map layers / analytics products.
             with solara.Row(
                 gap="0.5rem",
                 style={
@@ -2206,17 +2262,23 @@ def Page():
                     solara.Button(
                         PRODUCT_LABELS.get(product, product),
                         text=True,
+                        # Capture the current loop value so each button activates its own product.
                         on_click=lambda event=None, product=product: _select_product(product),
+                        # Apply active/inactive styling so the selected product is visually obvious.
                         style=_product_button_style(product),
                     )
+            # Build the product-specific controls only when a product is selected.
             controls_widget = _product_controls(active_product) if active_product else None
             legend_items = []
             if active_product:
+                # Request the matching legend fragment for the current product, if one exists.
                 legend_extra = _product_legend(active_product)
                 if legend_extra:
                     legend_items.append(legend_extra)
+            # Wrap legend content in a column so multiple legend blocks can stack cleanly.
             legend_widget = solara.Column(children=legend_items) if legend_items else None
             
+            # Show controls and legend side-by-side when either one is available.
             if legend_widget or controls_widget:
                 with solara.Row(
                     gap="1rem",
@@ -2236,16 +2298,19 @@ def Page():
                             style={"flex": "0 0 30%", "maxWidth": "30%"},
                             children=[legend_widget],
                         )
+            # Render the product summary below the controls card when provided by the active product.
             summary_widget = _product_summary(active_product)
             if summary_widget:
                 summary_widget
 
+        # Map wrapper keeps the leaflet map full width and provides a hook for overlay styling.
         with solara.Div(
             style={
                 "position": "relative",
                 "width": "100%",
             }
         ):
+            # Inject CSS overrides to make the Leaflet control panels semi-transparent and polished.
             solara.Style("""
                 .leaflet-top.leaflet-left .leaflet-control {
                     background: transparent !important;
@@ -2266,7 +2331,9 @@ def Page():
                     background: rgba(255,255,255,0.20) !important;
                 }
                 """)
+            # Display the prebuilt interactive Leaflet/Folium map object.
             solara.display(m)
+            # Overlay a loading indicator while product or map state is updating.
             _loading_badge()
         ## turn off if not showing the time sereis at the map window bottom
         #if ts_df is not None:
@@ -2275,6 +2342,7 @@ def Page():
         #        TimeSeriesFigure(ts_df, title=ts_title)
 #
         #Toast(message=toast_state["message"], kind=toast_state["kind"], visible=toast_state["visible"], on_close=hide_toast)
+        # Global toast notification for user feedback such as success, warning, or error messages.
         Toast(
             message=toast_state["message"],
             kind=toast_state["kind"],
