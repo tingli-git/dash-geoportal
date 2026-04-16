@@ -353,15 +353,19 @@ def _field_density_legend_widget() -> W.HTML:
     title = str(getattr(CFG, "field_density_legend_title", "Field density"))
     html = (
         #"<div style='padding-top:180px;background:transparent;'>"
-        "<div style='margin-top:52px;background:rgba(255,255,255,0.96);border:1px solid rgba(148,163,184,0.75);"
+        "<div style='margin-top:1px;background:rgba(255,255,255,0.4);backdrop-filter: blur(6px);border:1px solid rgba(148,163,184,0.4);"
         "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
         f"<div style='font-size:13px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
         #"<div style='font-size:11px;color:#475569;margin-top:4px;'>0 values remain transparent.</div>"
         f"{''.join(rows)}</div>"
         "</div>"
     )
-    return W.HTML(value=html)
-
+    panel = W.Box(
+    [W.HTML(value=html)],
+    layout=W.Layout(padding="0", margin="0")
+    )
+    panel.add_class("field-density-legend-panel")
+    return panel
 
 def _raster_legend_widget() -> W.HTML:
     if not getattr(CFG, "raster_legend_enabled", True):
@@ -381,12 +385,17 @@ def _raster_legend_widget() -> W.HTML:
         )
     title = str(getattr(CFG, "raster_legend_title", "Tree–Vege–Bare"))
     html = (
-        "<div style='margin-top:52px;background:rgba(255,255,255,0.96);border:1px solid rgba(148,163,184,0.75);"
+        "<div style='margin-top:1px;background:rgba(255,255,255,0.40);backdrop-filter: blur(6px);border:1px solid rgba(148,163,184,0.40);"
         "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
         f"<div style='font-size:13px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
         f"{''.join(rows)}</div>"
     )
-    return W.HTML(value=html)
+    panel = W.Box(
+    [W.HTML(value=html)],
+    layout=W.Layout(padding="0", margin="0")
+    )
+    panel.add_class("raster-legend-panel")
+    return panel
 
 
 def _product_legend(product: str):
@@ -535,7 +544,8 @@ def Page():
                 "left": "50%",
                 "transform": "translateX(-50%)",
                 "zIndex": "1000",
-                "background": "rgba(255,255,255,0.96)",
+                "background": "rgba(255,255,255,0.4)",
+                "backdropFilter": "blur(6px)",
                 "padding": "12px 21px",
                 "borderRadius": "15px",
                 "border": "1px solid rgba(148,163,184,0.65)",
@@ -842,6 +852,7 @@ def Page():
         control = ipyleaflet.WidgetControl(
             widget=_field_density_legend_widget(),
             position="topright",
+            transparent_bg=True,
         )
         try:
             m.add_control(control)
@@ -870,6 +881,7 @@ def Page():
         control = ipyleaflet.WidgetControl(
             widget=_raster_legend_widget(),
             position="topright",
+            transparent_bg = True,
         )
         try:
             m.add_control(control)
@@ -1002,6 +1014,7 @@ def Page():
         control = ipyleaflet.WidgetControl(
             widget=panel,
             position="topleft",
+            transparent_bg=True
         )
         try:
             m.add_control(control)
