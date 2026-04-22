@@ -809,6 +809,8 @@ def Page():
             child=table,
             close_button=True,
             auto_close=True,
+            keep_in_view=True,
+            offset=(0, -1),
         )
         m.add_layer(popup)
         field_popup_ref.current = popup

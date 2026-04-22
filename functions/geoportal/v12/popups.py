@@ -83,27 +83,41 @@ def show_popup(
             if isinstance(layer, ipyleaflet.Popup):
                 m.remove_layer(layer)
 
-        popup = ipyleaflet.Popup(
-            location=(float(lat), float(lon)),
-            child=child,
-            close_button=True,
-            auto_close=True,
-            close_on_escape_key=True,
-            auto_pan=False,
-            keep_in_view=False,
-            min_width=min_width or 1800,
-            max_width=max_width or 3000,
-        )
-
-        offset_ratio = getattr(CFG, "popup_offset_ratio", 0.0) or 0.0
-        offset_pct = int(round(offset_ratio * 100))
-        if offset_pct:
-            try:
-                popup.layout.transform = f"translateY(-{offset_pct}vh)"
-                popup.layout.margin = f"0 0 {offset_pct}vh 0"
-            except Exception:
-                pass
-
+        if on_show_timeseries is not None:
+            popup = ipyleaflet.Popup(
+                location=(float(lat), float(lon)),
+                child=child,
+                close_button=True,
+                auto_close=True,
+                close_on_escape_key=True,
+                auto_pan=False,
+                keep_in_view=False,
+                min_width=min_width or 1800,
+                max_width=max_width or 3000,
+            )
+        else:
+            popup = ipyleaflet.Popup(
+                location=(float(lat), float(lon)),
+                child=child,
+                close_button=True,
+                auto_close=True,
+                close_on_escape_key=True,
+                auto_pan=False,
+                keep_in_view=False,
+                min_width=min_width or 280,
+                max_width=max_width or 420,
+            )
+                
+      #offset_ratio = getattr(CFG, "popup_offset_ratio", 0.0) or 0.0
+      #offset_pct = int(round(offset_ratio * 100))
+      #if offset_pct:
+      #    try:
+      #        popup.layout.transform = f"translateY(-{offset_pct}vh)"
+      #        popup.layout.margin = f"0 0 {offset_pct}vh 0"
+      #    except Exception:
+      #        pass
+       
+ 
         m.add_layer(popup)
     finally:
         if suppress_owned:
