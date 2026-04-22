@@ -2194,6 +2194,19 @@ def Page():
 
     solara.use_effect(_sync_markers, [icon_group, bounds, active_product])
 
+    def _cleanup_sensor_layer():
+        if active_product == PRODUCT_SENSORS:
+            return
+        if not icon_group:
+            return
+        if icon_group in m.layers:
+            try:
+                m.remove_layer(icon_group)
+            except Exception:
+                pass
+
+    solara.use_effect(_cleanup_sensor_layer, [active_product, icon_group])
+
     def _apply_sensor_opacity():
         if not icon_group:
             return
