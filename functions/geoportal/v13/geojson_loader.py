@@ -4,7 +4,7 @@ from pathlib import Path
 import ipyleaflet
 from functions.geoportal.v13.utils import padded_bounds
 from functions.geoportal.v13.config import CFG
-from functions.geoportal.v13.popups import show_popup
+from functions.geoportal.v13.popups import show_sensor_attribute_badge
 
 def load_icon_group_from_geojson(
     path: Path,
@@ -43,16 +43,12 @@ def load_icon_group_from_geojson(
         # capture defaults to avoid late-binding
         marker.on_click(
             lambda props=props, lat=lat, lon=lon, mk=marker, **_:
-                show_popup(
+                show_sensor_attribute_badge(
                     m,
-                    lat,
-                    lon,
                     props,
                     mk,
                     active_marker_ref,
                     on_show_timeseries,
-                    min_width=1800,
-                    max_width=3000,
                 )
         )
         group.add_layer(marker)

@@ -56,7 +56,7 @@ from functions.geoportal.v13.tree_health_loader import build_tree_health_layer, 
 from functions.geoportal.v13.datepalm_province_loader import list_date_palm_provinces
 from functions.geoportal.v13.field_density_loader import build_field_density_layer
 from functions.geoportal.v13.lookup import FieldLookup
-from functions.geoportal.v13.popups import show_popup, clear_tree_health_badge
+from functions.geoportal.v13.popups import show_popup, clear_tree_health_badge, clear_sensor_badges
 from functions.geoportal.v13.utils import html_table_popup
 
 _GPKG_TEMP_DIR = Path(tempfile.gettempdir()) / "geoportal_datepalm"
@@ -1196,6 +1196,10 @@ def Page():
             pass
         try:
             clear_tree_health_badge(m)
+        except Exception:
+            pass
+        try:
+            clear_sensor_badges(m, refs.active_marker_ref)
         except Exception:
             pass
         field_popup_ref.current = None
@@ -2609,6 +2613,16 @@ def Page():
                 .leaflet-control .tree-health-attr-badge,
                 .leaflet-control .widget-box.tree-health-attr-badge,
                 .leaflet-control .jupyter-widgets.tree-health-attr-badge {
+                    background: rgba(255,255,255,0.20) !important;
+                    backdrop-filter: blur(4px) !important;
+                    -webkit-backdrop-filter: blur(4px) !important;
+                    border: 1px solid rgba(148,163,184,0.25) !important;
+                    border-radius: 12px !important;
+                    box-shadow: 0 8px 24px rgba(15,23,42,0.10) !important;
+                }
+                .leaflet-control .sensor-attr-badge,
+                .leaflet-control .widget-box.sensor-attr-badge,
+                .leaflet-control .jupyter-widgets.sensor-attr-badge {
                     background: rgba(255,255,255,0.20) !important;
                     backdrop-filter: blur(4px) !important;
                     -webkit-backdrop-filter: blur(4px) !important;
