@@ -3,10 +3,35 @@ from typing import Any, Callable, Optional
 
 import ipyleaflet
 import ipywidgets as W
-from IPython.display import display
+from IPython.display import display, HTML
 
 from functions.geoportal.v13.utils import html_table_popup
 from functions.geoportal.v13.config import CFG
+
+
+_BADGE_CSS_INSTALLED = False
+
+
+def _ensure_tree_health_badge_css() -> None:
+    global _BADGE_CSS_INSTALLED
+    if _BADGE_CSS_INSTALLED:
+        return
+
+    display(HTML("""
+    <style>
+    .tree-health-attr-badge {
+        background: rgba(255, 255, 255, 0.20) !important;
+        backdrop-filter: blur(0.1px);
+        -webkit-backdrop-filter: blur(0.1px);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
+        overflow: hidden;
+    }
+    </style>
+    """))
+    _BADGE_CSS_INSTALLED = True
+
 
 def clear_tree_health_badge(m: ipyleaflet.Map) -> None:
     control = getattr(m, "_tree_health_badge_control", None)
@@ -41,6 +66,7 @@ def show_tree_health_badge(
     m: ipyleaflet.Map,
     props: Optional[dict[str, Any]],
 ) -> None:
+    _ensure_tree_health_badge_css()
     _ensure_tree_health_badge_dismiss_listener(m)
     clear_tree_health_badge(m)
 
@@ -59,14 +85,15 @@ def show_tree_health_badge(
     title = W.HTML(
         value=(
             "<div style='"
-            "font-weight: 800;"
-            "font-size: clamp(0.95rem, 0.8rem + 0.55vw, 1.2rem);"
-            "line-height: 1.2;"
-            "color: #0f172a;"
-            "margin: 0 2.2rem 0 0;"
+            "font-weight:800;"
+            "font-size:clamp(0.95rem, 0.8rem + 0.55vw, 1.2rem);"
+            "line-height:1.2;"
+            "color:#0f172a;"
+            "margin:0 2.2rem 0 0;"
             "'>Tree Health Attributes</div>"
         )
     )
+
     close_btn = W.Button(
         description="×",
         tooltip="Close",
@@ -74,6 +101,7 @@ def show_tree_health_badge(
     )
     close_btn.style.button_color = "rgba(255,255,255,0)"
     close_btn.style.font_weight = "700"
+
     table = W.HTML(
         value=(
             "<div style='"
@@ -81,13 +109,9 @@ def show_tree_health_badge(
             "max-width:min(36rem, 42vw);"
             "max-height:min(58vh, 32rem);"
             "overflow:auto;"
-            "background:rgba(255,255,255,0.40);"
-            "backdrop-filter:blur(1px);"
-            "-webkit-backdrop-filter:blur(1px);"
+            "background:transparent;"
             "border-radius:12px;"
-            "padding:0.55rem 0.75rem;"
-            "box-shadow:0 8px 24px rgba(15,23,42,0.12);"
-            "border:1px solid rgba(148,163,184,0.40);"
+            "padding:0.55rem 0.75rem 0.7rem 0.75rem;"
             "font-size:clamp(0.72rem, 0.6rem + 0.38vw, 0.98rem);"
             "line-height:1.35;"
             "'>"
@@ -97,20 +121,26 @@ def show_tree_health_badge(
             "</div>"
         )
     )
-    body = W.VBox(
-        [
-            W.HBox([title, close_btn], layout=W.Layout(justify_content="space-between", align_items="center")),
-            table,
-        ],
+
+    header = W.HBox(
+        [title, close_btn],
         layout=W.Layout(
-            width="min(38rem, 44vw)",
+            justify_content="space-between",
+            align_items="center",
+            padding="0.55rem 0.75rem 0.1rem 0.75rem",
+            margin="0",
+        ),
+    )
+
+    body = W.VBox(
+        [header, table],
+        layout=W.Layout(
+            width="min(21rem, 25vw)",   # 20% narrower
             min_width="16rem",
-            max_width="44vw",
+            max_width="25vw",
             max_height="min(62vh, 36rem)",
             overflow="hidden",
             padding="0",
-            border="0",
-            border_radius="0",
         ),
     )
 
@@ -119,8 +149,13 @@ def show_tree_health_badge(
         layout=W.Layout(
             padding="0",
             margin="0",
+            background="rgba(255,255,255,0.20)",
+            border="1px solid rgba(148,163,184,0.25)",
+            border_radius="12px",
+            box_shadow="0 8px 24px rgba(15,23,42,0.40)",
         ),
     )
+
     try:
         wrapper.add_class("tree-health-attr-badge")
     except Exception:
@@ -160,7 +195,6 @@ def show_popup(
     Open a Leaflet popup at (lat, lon) showing a key/value table from `props`,
     and optionally a time-series widget under a button.
     """
-    # Marker icon highlight (for sensors only)
     if marker is not None:
         try:
             if active_marker_ref.current and active_marker_ref.current is not marker:
@@ -242,17 +276,7 @@ def show_popup(
                 min_width=min_width or 280,
                 max_width=max_width or 420,
             )
-                
-      #offset_ratio = getattr(CFG, "popup_offset_ratio", 0.0) or 0.0
-      #offset_pct = int(round(offset_ratio * 100))
-      #if offset_pct:
-      #    try:
-      #        popup.layout.transform = f"translateY(-{offset_pct}vh)"
-      #        popup.layout.margin = f"0 0 {offset_pct}vh 0"
-      #    except Exception:
-      #        pass
-       
- 
+
         m.add_layer(popup)
     finally:
         if suppress_owned:

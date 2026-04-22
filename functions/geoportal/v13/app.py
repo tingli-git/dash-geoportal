@@ -2605,6 +2605,18 @@ def Page():
         ):
             # Inject CSS overrides to make the Leaflet control panels semi-transparent and polished.
             solara.Style("""
+                         
+                .leaflet-control .tree-health-attr-badge,
+                .leaflet-control .widget-box.tree-health-attr-badge,
+                .leaflet-control .jupyter-widgets.tree-health-attr-badge {
+                    background: rgba(255,255,255,0.20) !important;
+                    backdrop-filter: blur(4px) !important;
+                    -webkit-backdrop-filter: blur(4px) !important;
+                    border: 1px solid rgba(148,163,184,0.25) !important;
+                    border-radius: 12px !important;
+                    box-shadow: 0 8px 24px rgba(15,23,42,0.10) !important;
+                }
+                         
                 .leaflet-top.leaflet-right {
                     display: flex;
                     flex-direction: column;
