@@ -187,6 +187,14 @@ def _bounds_to_bbox(bounds: List[List[float]] | None) -> Tuple[float, float, flo
         return None
 
 
+def _center_from_bounds(bounds: List[List[float]] | None) -> Tuple[float, float] | None:
+    bbox = _bounds_to_bbox(bounds)
+    if not bbox:
+        return None
+    west, south, east, north = bbox
+    return ((south + north) / 2.0, (west + east) / 2.0)
+
+
 def _vector_layer_id_from_mbtiles(province: str) -> Optional[str]:
     cache_dir = Path(getattr(CFG, "datepalms_tile_cache_dir", ""))
     if not cache_dir or not cache_dir.is_dir():
@@ -531,6 +539,7 @@ def Page():
     national_figure_closed, set_national_figure_closed = solara.use_state(False)
     loading_message, set_loading_message = solara.use_state(None)
     loading_product_ref = solara.use_ref(None)
+    active_product_ref = solara.use_ref(None)
 
 
     def _loading_badge():
@@ -559,6 +568,11 @@ def Page():
             },
             children=[solara.Text(str(loading_message))],
         )
+
+    def _sync_active_product_ref():
+        active_product_ref.current = active_product
+
+    solara.use_effect(_sync_active_product_ref, [active_product])
 
     def _attach_map_debug():
         if map_debug_attached.current:
@@ -820,6 +834,8 @@ def Page():
     solara.use_effect(_zoom_to_national_level, [active_product, selected_date_palm_province])
 
     def _apply_product_zoom(product: str):
+        if product == PRODUCT_TREE_HEALTH:
+            return
         target = PRODUCT_DEFAULT_ZOOM.get(product)
         if target is None:
             return
@@ -1151,7 +1167,18 @@ def Page():
             return
         if not bounds:
             return
-        _fit_bounds(bounds)
+        if product == PRODUCT_TREE_HEALTH:
+            center = _center_from_bounds(bounds)
+            target_zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_TREE_HEALTH, 14)
+            try:
+                if center is not None:
+                    m.center = center
+                if getattr(m, "zoom", None) is not None and target_zoom is not None:
+                    m.zoom = target_zoom
+            except Exception as exc:
+                print(f"[DEBUG fit] failed to center Tree Health on {center}: {exc}")
+        else:
+            _fit_bounds(bounds)
         pending_fit_product.current = None
 
     def _clear_popups():
@@ -1159,6 +1186,8 @@ def Page():
             for layer in list(m.layers):
                 if isinstance(layer, ipyleaflet.Popup):
                     if getattr(layer, "_is_geojson_hint", False):
+                        continue
+                    if getattr(layer, "_is_tree_health_hint", False):
                         continue
                     m.remove_layer(layer)
         except Exception:
@@ -1838,6 +1867,9 @@ def Page():
 
     geojson_hint_ref = solara.use_ref(None)
     geojson_hint_shown_ref = solara.use_ref(False)
+    tree_health_hint_ref = solara.use_ref(None)
+    tree_health_hint_shown_ref = solara.use_ref(False)
+    tree_health_hint_listener_attached = solara.use_ref(False)
 
     def _remove_geojson_hint():
         popup = geojson_hint_ref.current
@@ -1864,15 +1896,36 @@ def Page():
             return
         if geojson_hint_shown_ref.current:
             return
-        center = getattr(m, "center", None) or (25.0, 45.0)
-        location = (center[0], center[1]) if len(center) >= 2 else (25.0, 45.0)
+        bounds = getattr(m, "bounds", None)
+
+        if bounds and len(bounds) == 2:
+            south, west = bounds[0]
+            north, east = bounds[1]
+            lat = north - (north - south) * 0.08
+            lon = (west + east) / 2
+            location = (lat, lon)
+        else:
+            center = getattr(m, "center", None) or (25.0, 45.0)
+            location = (center[0], center[1]) if len(center) >= 2 else (25.0, 45.0)
+
         message = W.HTML(
-            "<div style='padding:0.35rem 0.75rem;font-weight:600;font-size:1.5rem;"
-            "background-color:rgba(255,255,255,0.5);border-radius:4px;display:flex;flex-direction:column;"
-            "gap:0.2rem;width:420px;'>"
-            "<span>Loading Geojson.</span>"
-            "<span style='font-size:1.35rem;font-weight:500;'>Click a polygon to check attribute information.</span>"
-            "</div>"
+            value=(
+                "<div style='"
+                "background: rgba(255,255,255,0.2);"
+                "backdrop-filter: blur(6px);"
+                "padding: 12px 21px;"
+                "border-radius: 15px;"
+                "border: 1px solid rgba(148,163,184,0.65);"
+                "box-shadow: 0 8px 20px rgba(15,23,42,0.16);"
+                "font-weight: 700;"
+                "font-size: 1.5rem;"
+                "color: #0f172a;"
+                "text-align: center;"
+                "min-width: 420px;"
+                "'>"
+                "Tree HEALTH: Geojson loaded, please click the points to check attribute information."
+                "</div>"
+            )
         )
         popup = ipyleaflet.Popup(
             location=location,
@@ -1882,6 +1935,7 @@ def Page():
             keep_in_view=False,
             min_width=420,
             max_width=520,
+            class_name="tree-health-top-center-popup",
         )
         setattr(popup, "_is_geojson_hint", True)
 
@@ -1904,6 +1958,121 @@ def Page():
         _maybe_show_geojson_hint,
         [active_product, selected_date_palm_province, current_zoom],
     )
+
+    def _remove_tree_health_hint():
+        popup = tree_health_hint_ref.current
+        if popup and (popup in m.layers):
+            try:
+                m.remove_layer(popup)
+            except Exception:
+                pass
+        tree_health_hint_ref.current = None
+
+    def _maybe_show_tree_health_hint():
+        if active_product != PRODUCT_TREE_HEALTH:
+            tree_health_hint_shown_ref.current = False
+            _remove_tree_health_hint()
+            return
+        if loading_message:
+            tree_health_hint_shown_ref.current = False
+            _remove_tree_health_hint()
+            return
+        if th_layer is None:
+            tree_health_hint_shown_ref.current = False
+            _remove_tree_health_hint()
+            return
+        if tree_health_hint_shown_ref.current:
+            return
+
+        #center = getattr(m, "center", None) or (25.0, 45.0)
+        #location = (center[0], center[1]) if len(center) >= 2 else (25.0, 45.0)
+        bounds = getattr(m, "bounds", None)
+
+        if bounds and len(bounds) == 2:
+            south, west = bounds[0]
+            north, east = bounds[1]
+            # top center of current visible map
+            lat = north - (north - south) * 0.08
+            lon = (west + east) / 2
+            location = (lat, lon)
+        else:
+            center = getattr(m, "center", None) or (25.0, 45.0)
+            location = (center[0], center[1]) if len(center) >= 2 else (25.0, 45.0)
+            
+        message = W.HTML(
+            value=(
+                "<div style='"
+                "background: rgba(255,255,255,0.4);"
+                "backdrop-filter: blur(6px);"
+                "padding: 12px 21px;"
+                "border-radius: 15px;"
+                "border: 1px solid rgba(148,163,184,0.65);"
+                "box-shadow: 0 8px 20px rgba(15,23,42,0.16);"
+                "font-weight: 700;"
+                "font-size: 1.5rem;"
+                "color: #0f172a;"
+                "text-align: center;"
+                "min-width: 420px;"
+                "'>"
+                "Tree HEALTH: Geojson loaded, please click the points to check attribute information."
+                "</div>"
+            )
+        )
+
+        popup = ipyleaflet.Popup(
+            location=location,
+            child=message,
+            close_button=True,
+            auto_close=False,
+            keep_in_view=False,
+            min_width=420,
+            max_width=520,
+        )
+        setattr(popup, "_is_tree_health_hint", True)
+
+        def _on_hint_close(*_):
+            tree_health_hint_shown_ref.current = False
+            tree_health_hint_ref.current = None
+
+        try:
+            popup.on_close(_on_hint_close)
+        except Exception:
+            pass
+
+        try:
+            m.add_layer(popup)
+        except Exception:
+            pass
+
+        tree_health_hint_ref.current = popup
+        tree_health_hint_shown_ref.current = True
+
+    solara.use_effect(
+        _maybe_show_tree_health_hint,
+        [active_product, loading_message, th_layer],
+    )
+
+    def _attach_tree_health_hint_dismiss():
+        if tree_health_hint_listener_attached.current:
+            return
+
+        def _on_map_interact(**event):
+            if event.get("type") != "click":
+                return
+            if active_product_ref.current != PRODUCT_TREE_HEALTH:
+                return
+            if not tree_health_hint_shown_ref.current:
+                return
+            tree_health_hint_shown_ref.current = False
+            _remove_tree_health_hint()
+
+        try:
+            m.on_interaction(_on_map_interact)
+            tree_health_hint_listener_attached.current = True
+        except Exception:
+            pass
+
+    solara.use_effect(_attach_tree_health_hint_dismiss, [m, active_product])
     
     def _date_palm_hover_style():
         weight = float(getattr(CFG, "datepalms_province_hover_weight", 2.8))
@@ -2241,6 +2410,7 @@ def Page():
                     pass
             clear_tree_health_highlight()
             return
+        layer_to_use = th_layer
         if th_layer is None:
             layer, err = build_tree_health_layer(m=m, active_marker_ref=refs.active_marker_ref, fill_opacity=th_opacity)
             if err:
@@ -2248,11 +2418,12 @@ def Page():
                 set_th_layer(None)
                 return
             set_th_layer(layer)
+            layer_to_use = layer
 
-        if th_layer is None:
+        if layer_to_use is None:
             return
 
-        for marker in getattr(th_layer, "layers", []):
+        for marker in getattr(layer_to_use, "layers", []):
             try:
                 marker.fill_opacity = float(th_opacity)
                 marker.opacity = float(th_opacity)
@@ -2264,9 +2435,9 @@ def Page():
             if layer and (layer in m.layers):
                 anchor = layer
                 break
-        if th_layer not in m.layers:
-            _insert_after(th_layer, anchor)
-        _maybe_fit_product(PRODUCT_TREE_HEALTH, getattr(th_layer, "_bounds", None))
+        if layer_to_use not in m.layers:
+            _insert_after(layer_to_use, anchor)
+        _maybe_fit_product(PRODUCT_TREE_HEALTH, getattr(layer_to_use, "_bounds", None))
         _finish_loading(PRODUCT_TREE_HEALTH)
 
     solara.use_effect(_ensure_th_layer, [active_product, dp_layer_full, dp_layer_simple, cp_layer, raster_layer, th_opacity])
@@ -2432,7 +2603,25 @@ def Page():
                 .leaflet-control .jupyter-widgets.national-figure-panel {
                     background: rgba(255,255,255,0.20) !important;
                 }
-                
+                .leaflet-popup.tree-health-top-center-popup {
+                    margin-left: -210px !important;   /* half of ~420px width */
+                    margin-top: 0 !important;
+                }
+
+                .leaflet-popup.tree-health-top-center-popup .leaflet-popup-tip-container {
+                    display: none !important;
+                }
+
+                .leaflet-popup.tree-health-top-center-popup .leaflet-popup-content-wrapper {
+                    background: transparent !important;
+                    box-shadow: none !important;
+                    border: none !important;
+                    padding: 0 !important;
+                }
+
+                .leaflet-popup.tree-health-top-center-popup .leaflet-popup-content {
+                    margin: 0 !important;
+                }
                             
             """)
             # Display the prebuilt interactive Leaflet/Folium map object.
