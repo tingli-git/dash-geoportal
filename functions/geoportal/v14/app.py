@@ -21,6 +21,7 @@ import json
 import math
 import sqlite3
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional, Tuple, List, Sequence
 from urllib.parse import urlparse
@@ -67,6 +68,8 @@ _GPKG_TEMP_DIR.mkdir(parents=True, exist_ok=True)
 IS_PRODUCTION = getattr(CFG, "app_mode", "development") == "production"
 _APP_SERVER_ROOT = getattr(CFG, "app_server_root", CFG.top_dir / "Datepalm" / "app_server")
 _ORIGINAL_ASSET_DIRECTORIES = solara_server.asset_directories
+_AUTH_IDLE_TIMEOUT_SECONDS = 60 * 60
+_AUTH_SESSIONS: dict[str, float] = {}
 
 
 def _asset_directories_with_app_server():
@@ -531,8 +534,30 @@ def _auth_enabled() -> bool:
     return bool(getattr(CFG, "auth_username", "")) and bool(getattr(CFG, "auth_password", ""))
 
 
+def _touch_auth_session(session_id: str):
+    if session_id:
+        _AUTH_SESSIONS[session_id] = time.time()
+
+
+def _clear_auth_session(session_id: str):
+    if session_id:
+        _AUTH_SESSIONS.pop(session_id, None)
+
+
+def _auth_session_is_valid(session_id: str) -> bool:
+    if not session_id:
+        return False
+    last_seen = _AUTH_SESSIONS.get(session_id)
+    if last_seen is None:
+        return False
+    if (time.time() - last_seen) > _AUTH_IDLE_TIMEOUT_SECONDS:
+        _AUTH_SESSIONS.pop(session_id, None)
+        return False
+    return True
+
+
 @solara.component
-def _LoginGate(on_success):
+def _LoginGate(on_success, session_id: str):
     username, set_username = solara.use_state("")
     password, set_password = solara.use_state("")
     error_message, set_error_message = solara.use_state("")
@@ -542,6 +567,7 @@ def _LoginGate(on_success):
         expected_password = getattr(CFG, "auth_password", "")
         if username == expected_username and password == expected_password:
             set_error_message("")
+            _touch_auth_session(session_id)
             on_success()
             return
         set_error_message("Invalid username or password.")
@@ -608,10 +634,25 @@ def _LoginGate(on_success):
 @solara.component
 def Page():
     show_toast, hide_toast, toast_state = use_toast()
-    authenticated, set_authenticated = solara.use_state(not _auth_enabled())
+    session_id = solara.get_session_id()
+    authenticated, set_authenticated = solara.use_state(
+        (not _auth_enabled()) or _auth_session_is_valid(session_id)
+    )
+
+    def _sync_auth_session():
+        if not _auth_enabled():
+            if not authenticated:
+                set_authenticated(True)
+            return
+
+        session_valid = _auth_session_is_valid(session_id)
+        if session_valid != authenticated:
+            set_authenticated(session_valid)
+
+    solara.use_effect(_sync_auth_session, [session_id, authenticated])
 
     if not authenticated:
-        _LoginGate(lambda: set_authenticated(True))
+        _LoginGate(lambda: set_authenticated(True), session_id)
         return
 
     # UI state
@@ -740,6 +781,29 @@ def Page():
         set_fetch_debug_tick(lambda current: current + 1)
 
     solara.use_effect(_refresh_fetch_debug, [active_product, force_gcs, selected_date_palm_province, current_zoom, loading_message])
+
+    def _touch_authenticated_session():
+        if _auth_enabled() and authenticated:
+            _touch_auth_session(session_id)
+
+    solara.use_effect(
+        _touch_authenticated_session,
+        [
+            session_id,
+            authenticated,
+            active_product,
+            force_gcs,
+            geojson_path,
+            raster_dir,
+            selected_date_palm_province,
+            current_zoom,
+            click_point,
+            hover_point,
+            field_info,
+            selected_field_record,
+            loading_message,
+        ],
+    )
 
     def _attach_map_debug():
         if map_debug_attached.current:
