@@ -29,10 +29,20 @@ DEFAULT_GCLOUD_BIN = os.environ.get(
 
 CACHE_ROOT = Path(tempfile.gettempdir()) / "geoportal_asset_cache"
 CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+_FORCE_GCS = os.environ.get("FORCE_GCS", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def gcs_enabled() -> bool:
     return bool(os.environ.get("GCS_BUCKET_NAME", DEFAULT_GCS_BUCKET_NAME))
+
+
+def force_gcs_enabled() -> bool:
+    return _FORCE_GCS
+
+
+def set_force_gcs(enabled: bool) -> None:
+    global _FORCE_GCS
+    _FORCE_GCS = bool(enabled)
 
 
 def use_service_account_json() -> bool:
@@ -137,7 +147,7 @@ def _gcloud_download_bytes(path: str | Path) -> bytes:
 
 def ensure_local_asset(path: str | Path) -> Path:
     p = local_path_for(path)
-    if p.exists():
+    if not force_gcs_enabled() and p.exists():
         return p
     if not gcs_enabled():
         return p
@@ -246,6 +256,12 @@ def list_directory_names(path: str | Path, suffix: str) -> list[str]:
 
 
 def read_asset_bytes(path: str | Path) -> bytes:
+    if force_gcs_enabled() and gcs_enabled():
+        if use_service_account_json():
+            blob = get_bucket().blob(object_name_for_path(path))
+            return blob.download_as_bytes()
+        return _gcloud_download_bytes(path)
+
     local = ensure_local_asset(path)
     if local.exists():
         return local.read_bytes()

@@ -60,7 +60,7 @@ from functions.geoportal.v14.field_density_loader import build_field_density_lay
 from functions.geoportal.v14.lookup import FieldLookup
 from functions.geoportal.v14.popups import show_popup, clear_tree_health_badge, clear_sensor_badges
 from functions.geoportal.v14.utils import html_table_popup
-from functions.geoportal.v14.cloud_assets import asset_url_for, ensure_local_asset, ensure_local_directory, read_asset_bytes, guess_content_type, gcs_enabled
+from functions.geoportal.v14.cloud_assets import asset_url_for, ensure_local_asset, ensure_local_directory, read_asset_bytes, guess_content_type, gcs_enabled, force_gcs_enabled, set_force_gcs
 
 _GPKG_TEMP_DIR = Path(tempfile.gettempdir()) / "geoportal_datepalm"
 _GPKG_TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -505,6 +505,7 @@ def Page():
 
     # UI state
     geojson_path, set_geojson_path = solara.use_state(str(CFG.default_geojson))
+    force_gcs, set_force_gcs_state = solara.use_state(force_gcs_enabled())
     debounced_geojson = use_debounce(geojson_path, delay_ms=500)
     refs = ReactiveRefs()
     ## turn off the below two line if not showing as page at the bottom of the map window
@@ -620,6 +621,11 @@ def Page():
         active_product_ref.current = active_product
 
     solara.use_effect(_sync_active_product_ref, [active_product])
+
+    def _sync_force_gcs():
+        set_force_gcs(force_gcs)
+
+    solara.use_effect(_sync_force_gcs, [force_gcs])
 
     def _attach_map_debug():
         if map_debug_attached.current:
@@ -2589,6 +2595,19 @@ def Page():
         # Card groups the product picker and the widgets that depend on the active product.
         with solara.Card("", style={"padding": "1px"}):
             solara.Markdown("**Products**", style={"fontSize": "1.3rem","marginTop": "-20px","color":"#424345"})
+            with solara.Row(
+                gap="1rem",
+                style={"alignItems": "center", "marginBottom": "0.75rem", "flexWrap": "wrap"},
+            ):
+                solara.Switch(
+                    label="Force GCS for server-side asset reads",
+                    value=force_gcs,
+                    on_value=set_force_gcs_state,
+                )
+                solara.Markdown(
+                    f"`Mode:` {'GCS only for direct asset reads' if force_gcs else 'Local first, GCS fallback'}",
+                    style={"fontSize": "0.95rem", "color": "#475569", "margin": "0"},
+                )
             # Product buttons let the user switch between map layers / analytics products.
             with solara.Row(
                 gap="0.5rem",

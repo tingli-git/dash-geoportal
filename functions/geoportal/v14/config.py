@@ -9,7 +9,9 @@ from types import SimpleNamespace
 class Config:
     # --- App & map basics ---
     top_dir: Path = Path("/datawaha/esom/DatePalmCounting/Geoportal")
-    default_geojson: Path = Path("/datawaha/esom/DatePalmCounting/Geoportal/Sensors/SensorInfos/AldakaSensors.geojson")
+    default_geojson: Path = Path(
+        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/Aldka/SensorInfos/AldakaSensors.geojson"
+    )
     map_center: tuple[float, float] = (24.0, 45.0)
     map_zoom: int = 6
     map_height: str = "90vh"
@@ -27,7 +29,9 @@ class Config:
     fit_bounds_padding: tuple[int, int] = (20, 20)
 
     # --- Timeseries CSVs ---
-    sensor_csv_dir: Path = Path("/datawaha/esom/DatePalmCounting/Geoportal/Sensors/SensorReads/")
+    sensor_csv_dir: Path = Path(
+        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/Aldka/SensorReads"
+    )
     time_col_candidates: tuple[str, ...] = ("timestamp", "time", "datetime", "date", "Date Time")
     # --- NDVI time series for Date Palm polygons ---
     # CSVs named as <Field_id>.csv with 2 columns: [date, ndvi_median]
