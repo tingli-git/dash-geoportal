@@ -1,4 +1,4 @@
-# functions/geoportal/v13/app.py
+# functions/geoportal/v14/app.py
 # cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
 # source .venv/bin/activate
 # # check required pkgs use $ python -m pip list
@@ -9,7 +9,7 @@
 # cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
 # source .venv/bin/activate
 # python -m pip install -e .
-# solara run --production /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/functions/geoportal/v13/app.py 
+# solara run --production /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/functions/geoportal/v14/app.py 
 ## if solara not founded, run $ hash -r 
 # solara application will be running at localhost:8765
 # ------------------------------------
@@ -30,34 +30,36 @@ import geopandas as gpd
 import solara
 import ipyleaflet
 import ipywidgets as W
+from fastapi import FastAPI
 
-from starlette.responses import PlainTextResponse
+from starlette.responses import PlainTextResponse, Response
 from solara.server.fastapi import app as solara_app
 
-from functions.geoportal.v13.config import CFG
-from functions.geoportal.v13.state import ReactiveRefs
-from functions.geoportal.v13.basemap import (
+from functions.geoportal.v14.config import CFG
+from functions.geoportal.v14.state import ReactiveRefs
+from functions.geoportal.v14.basemap import (
     create_base_map, osm_layer, esri_world_imagery_layer,
     ensure_controls, ensure_base_layers,
 )
-from functions.geoportal.v13.layers import (
+from functions.geoportal.v14.layers import (
     upsert_overlay_by_name, set_layer_opacity,
 )
-from functions.geoportal.v13.widgets import use_debounce
-from functions.geoportal.v13.errors import Toast, use_toast
-from functions.geoportal.v13.geojson_loader import load_icon_group_from_geojson
-from functions.geoportal.v13.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget
-from functions.geoportal.v13.center_pivot_loader import build_center_pivot_layer
+from functions.geoportal.v14.widgets import use_debounce
+from functions.geoportal.v14.errors import Toast, use_toast
+from functions.geoportal.v14.geojson_loader import load_icon_group_from_geojson
+from functions.geoportal.v14.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget
+from functions.geoportal.v14.center_pivot_loader import build_center_pivot_layer
 from shapely.geometry import mapping, box
 
-from functions.geoportal.v13.datepalm_loader import build_datepalms_layer  # NEW
-from functions.geoportal.v13.ksa_bounds_loader import build_ksa_bounds_layer
-from functions.geoportal.v13.tree_health_loader import build_tree_health_layer, clear_tree_health_highlight
-from functions.geoportal.v13.datepalm_province_loader import list_date_palm_provinces
-from functions.geoportal.v13.field_density_loader import build_field_density_layer
-from functions.geoportal.v13.lookup import FieldLookup
-from functions.geoportal.v13.popups import show_popup, clear_tree_health_badge, clear_sensor_badges
-from functions.geoportal.v13.utils import html_table_popup
+from functions.geoportal.v14.datepalm_loader import build_datepalms_layer  # NEW
+from functions.geoportal.v14.ksa_bounds_loader import build_ksa_bounds_layer
+from functions.geoportal.v14.tree_health_loader import build_tree_health_layer, clear_tree_health_highlight
+from functions.geoportal.v14.datepalm_province_loader import list_date_palm_provinces
+from functions.geoportal.v14.field_density_loader import build_field_density_layer
+from functions.geoportal.v14.lookup import FieldLookup
+from functions.geoportal.v14.popups import show_popup, clear_tree_health_badge, clear_sensor_badges
+from functions.geoportal.v14.utils import html_table_popup
+from functions.geoportal.v14.cloud_assets import asset_url_for, ensure_local_asset, ensure_local_directory, read_asset_bytes, guess_content_type, gcs_enabled
 
 _GPKG_TEMP_DIR = Path(tempfile.gettempdir()) / "geoportal_datepalm"
 _GPKG_TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -67,17 +69,34 @@ _GPKG_TEMP_DIR.mkdir(parents=True, exist_ok=True)
 # small API (health check)
 # -------------------------
 API_PREFIX = "/api"
+backend_api = FastAPI()
 
-@solara_app.get(f"{API_PREFIX}/ping")
+@backend_api.get("/ping")
 def ping():
     return PlainTextResponse("pong")
 
+
+@backend_api.get("/assets/{asset_path:path}")
+def serve_asset(asset_path: str):
+    try:
+        data = read_asset_bytes(asset_path)
+    except Exception as exc:
+        return PlainTextResponse(f"Not found: {asset_path} ({exc})", status_code=404)
+
+    media_type = guess_content_type(asset_path)
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=3600",
+    }
+    return Response(data, media_type=media_type, headers=headers)
+
+solara_app.mount(API_PREFIX, backend_api)
 
 
 # -------------------------
 # External tiles server base (manual)
 # -------------------------
-TILES_HTTP_BASE: str = getattr(CFG, "tiles_http_base", "http://127.0.0.1:8766")
+TILES_HTTP_BASE: str = getattr(CFG, "tiles_http_base", "/api/assets/38RLQ_2024")
 
 PRODUCT_TREE_VEGE = "tree_vege"
 PRODUCT_DATEPALM = "datepalm"
@@ -719,7 +738,7 @@ def Page():
         if not province:
             return None, None
         base_dir = Path(getattr(CFG, "datepalms_province_dir", ""))
-        local = base_dir / f"{province}.geojson" if base_dir else None
+        local = ensure_local_asset(base_dir / f"{province}.geojson") if base_dir else None
         http_base = getattr(CFG, "datepalms_province_http_base", "").rstrip("/")
         remote = f"{http_base}/{province}.geojson" if http_base else None
         return (local if local and local.exists() else None), remote
@@ -957,11 +976,8 @@ def Page():
             return
 
         figure_path = Path(getattr(CFG, "datepalms_national_figure_file", ""))
-        if not figure_path.exists():
-            return
-
         try:
-            image_bytes = figure_path.read_bytes()
+            image_bytes = read_asset_bytes(figure_path)
         except Exception:
             return
 
@@ -1565,14 +1581,19 @@ def Page():
     def _on_tiles_folder_change():
         if active_product != PRODUCT_TREE_VEGE:
             return
-        folder = Path(debounced_raster_dir).resolve()
-        if not folder.exists():
-            show_toast(f"Tiles folder not found: {folder}", "warning")
-            return
-
-        ext = _detect_extension(folder) or "png"
-        _zmin, _zmax = _detect_zoom_range(folder)
-        bounds = _leaflet_bounds_from_xyz(folder, _zmax) if _zmax is not None else None
+        folder = ensure_local_directory(Path(debounced_raster_dir), suffixes=(".png", ".jpg", ".jpeg")).resolve()
+        if folder.exists():
+            ext = _detect_extension(folder) or "png"
+            _zmin, _zmax = _detect_zoom_range(folder)
+            bounds = _leaflet_bounds_from_xyz(folder, _zmax) if _zmax is not None else None
+        else:
+            if not gcs_enabled():
+                show_toast(f"Tiles folder not found: {folder}", "warning")
+                return
+            ext = getattr(CFG, "raster_tile_ext", "png")
+            _zmin = int(getattr(CFG, "raster_tile_min_zoom", 0))
+            _zmax = int(getattr(CFG, "raster_tile_max_zoom_default", 14))
+            bounds = None
 
         set_tile_ext(ext)
         set_zmin(_zmin)

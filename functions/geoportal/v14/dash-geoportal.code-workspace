@@ -1,0 +1,24 @@
+{
+	"folders": [
+		{
+			"name": "dash-geoportal",
+			"path": "../../.."
+		},
+		{
+			"name": "cropmapping",
+			"path": "../../../../../../../../../../rhome/lit0a/py_code/github_ting/cropmapping"
+		},
+		{
+			"name": "DatePalm_pypkg",
+			"path": "../../../../DatePalm_pypkg"
+		},
+		{
+			"name": "lit0a",
+			"path": "../../../../../../../../../../home/lit0a"
+		},
+		{
+			"name": "lit0a",
+			"path": "../../../../../../../../../../rhome/lit0a"
+		}
+	]
+}

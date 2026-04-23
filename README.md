@@ -10,10 +10,11 @@ A beginner-friendly template to build a local-first geospatial portal with:
 
 ## 0) Install
 ```bash
-cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
-#python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-#pip install -r requirements.txt
+cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
 python -m pip install -e . 
 ```
 

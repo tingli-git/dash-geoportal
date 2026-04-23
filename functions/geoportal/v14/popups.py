@@ -5,8 +5,8 @@ import ipyleaflet
 import ipywidgets as W
 from IPython.display import display, HTML
 
-from functions.geoportal.v13.utils import html_table_popup
-from functions.geoportal.v13.config import CFG
+from functions.geoportal.v14.utils import html_table_popup
+from functions.geoportal.v14.config import CFG
 
 
 _BADGE_CSS_INSTALLED = False
