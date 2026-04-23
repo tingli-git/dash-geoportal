@@ -16,7 +16,7 @@ import geopandas as gpd
 from functions.geoportal.v14.config import CFG
 from functions.geoportal.v14.popups import show_popup
 from functions.geoportal.v14.timeseries import _to_time_strings  # 👈 NEW
-from functions.geoportal.v14.cloud_assets import ensure_local_asset
+from functions.geoportal.v14.cloud_assets import ensure_local_asset, force_gcs_enabled
 
 
 # Optional reprojection (if pyproj is available)
@@ -277,7 +277,11 @@ def _build_ndvi_widget(props: Dict[str, Any]) -> W.Widget:
 
         # 2) Fallback to HTTP if local missing
         if df is None:
-            base = getattr(CFG, "ndvi_http_base", "").rstrip("/")
+            base = getattr(
+                CFG,
+                "ndvi_public_http_base" if force_gcs_enabled() else "ndvi_http_base",
+                "",
+            ).rstrip("/")
             if base:
                 url = f"{base}/{field_id}.csv"
                 df = pd.read_csv(url)
@@ -366,7 +370,11 @@ def _read_geojson_from_path(path: Path) -> Dict[str, Any]:
 def _load_datepalm_collection(simplify_tolerance: float | None) -> Tuple[Dict[str, Any], str]:
     gpkg_path = ensure_local_asset(Path(getattr(CFG, "datepalms_gpkg_file", "")))
     geojson_path = ensure_local_asset(Path(getattr(CFG, "datepalms_geojson_file", "")))
-    url = getattr(CFG, "datepalms_http_url", None)
+    url = getattr(
+        CFG,
+        "datepalms_public_http_url" if force_gcs_enabled() else "datepalms_http_url",
+        None,
+    )
 
     data: Dict[str, Any]
     source_desc = ""

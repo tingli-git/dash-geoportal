@@ -5,13 +5,31 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 
+DEFAULT_TOP_DIR = Path("/datawaha/esom/DatePalmCounting/Geoportal")
+TOP_DIR = Path(os.environ.get("GEOPORTAL_TOP_DIR", str(DEFAULT_TOP_DIR)))
+APP_SERVER_ROOT = Path(
+    os.environ.get("LOCAL_ASSET_ROOT", str(TOP_DIR / "Datepalm" / "app_server"))
+)
+APP_MODE = os.environ.get("GEOPORTAL_MODE", "development").strip().lower()
+ASSET_BASE_URL = os.environ.get("APP_ASSET_BASE_URL", "/static/assets").rstrip("/")
+GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "ksa_datepalm").strip()
+GCS_ASSET_PREFIX = os.environ.get("GCS_ASSET_PREFIX", "app_server").strip("/")
+PUBLIC_ASSET_BASE_URL = (
+    f"https://storage.googleapis.com/{GCS_BUCKET_NAME}/{GCS_ASSET_PREFIX}"
+    if GCS_ASSET_PREFIX
+    else f"https://storage.googleapis.com/{GCS_BUCKET_NAME}"
+)
+PUBLIC_DATEPALMS_TILE_BASE_URL = (
+    f"{PUBLIC_ASSET_BASE_URL}/datepalms_tiles"
+)
+
 @dataclass(frozen=True)
 class Config:
     # --- App & map basics ---
-    top_dir: Path = Path("/datawaha/esom/DatePalmCounting/Geoportal")
-    default_geojson: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/Aldka/SensorInfos/AldakaSensors.geojson"
-    )
+    top_dir: Path = TOP_DIR
+    app_mode: str = APP_MODE
+    app_server_root: Path = APP_SERVER_ROOT
+    default_geojson: Path = APP_SERVER_ROOT / "Aldka" / "SensorInfos" / "AldakaSensors.geojson"
     map_center: tuple[float, float] = (24.0, 45.0)
     map_zoom: int = 6
     map_height: str = "90vh"
@@ -29,29 +47,25 @@ class Config:
     fit_bounds_padding: tuple[int, int] = (20, 20)
 
     # --- Timeseries CSVs ---
-    sensor_csv_dir: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/Aldka/SensorReads"
-    )
+    sensor_csv_dir: Path = APP_SERVER_ROOT / "Aldka" / "SensorReads"
     time_col_candidates: tuple[str, ...] = ("timestamp", "time", "datetime", "date", "Date Time")
     # --- NDVI time series for Date Palm polygons ---
     # CSVs named as <Field_id>.csv with 2 columns: [date, ndvi_median]
-    ndvi_csv_dir: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/ndvi_timeseries_csvs"
-    )
+    ndvi_csv_dir: Path = APP_SERVER_ROOT / "ndvi_timeseries_csvs"
     # Optional HTTP base if you prefer loading via http.server
-    ndvi_http_base: str = os.environ.get("NDVI_HTTP_BASE", "/static/assets/ndvi_timeseries_csvs")
+    ndvi_http_base: str = os.environ.get("NDVI_HTTP_BASE", f"{ASSET_BASE_URL}/ndvi_timeseries_csvs")
+    ndvi_public_http_base: str = os.environ.get("NDVI_PUBLIC_HTTP_BASE", f"{PUBLIC_ASSET_BASE_URL}/ndvi_timeseries_csvs")
 
     # --- Local XYZ tiles (filesystem source) ---
-    default_tiles_dir: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/38RLQ_2024"
-    )
+    default_tiles_dir: Path = APP_SERVER_ROOT / "38RLQ_2024"
     raster_layer_name: str = "Tree-Vege-NonVege Classification"
     raster_opacity_default: float = 0.75
     raster_max_zoom: int = 14  # 10 m → ~14 native; 15 looks smoother (oversample)
     datepalms_default_opacity: float = 0.55
 
     # Manual external tiles server
-    tiles_http_base: str = os.environ.get("RASTER_TILES_HTTP_BASE", "/static/assets/38RLQ_2024")
+    tiles_http_base: str = os.environ.get("RASTER_TILES_HTTP_BASE", f"{ASSET_BASE_URL}/38RLQ_2024")
+    tiles_public_http_base: str = os.environ.get("RASTER_TILES_PUBLIC_HTTP_BASE", f"{PUBLIC_ASSET_BASE_URL}/38RLQ_2024")
 
     # -----------------------------
     # Raster Legend Configuration
@@ -113,10 +127,9 @@ class Config:
     )
 
     # --- Center-Pivot (CPF) GeoJSONs ---
-    center_pivot_dir: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/center_pivot"
-    )
-    center_pivot_http_base: str = os.environ.get("CENTER_PIVOT_HTTP_BASE", "/static/assets/center_pivot")
+    center_pivot_dir: Path = APP_SERVER_ROOT / "center_pivot"
+    center_pivot_http_base: str = os.environ.get("CENTER_PIVOT_HTTP_BASE", f"{ASSET_BASE_URL}/center_pivot")
+    center_pivot_public_http_base: str = os.environ.get("CENTER_PIVOT_PUBLIC_HTTP_BASE", f"{PUBLIC_ASSET_BASE_URL}/center_pivot")
     center_pivot_layer_name: str = "Center-Pivot Fields"
     center_pivot_years: tuple[int, ...] = (1995,2000,2005,2010,2015,2016,2017,2018,2019,2020,2021,2022,2023)
     center_pivot_default_year: int = 2023
@@ -125,9 +138,7 @@ class Config:
     center_pivot_default_roi: tuple[float, float, float, float] = (24.0, 40.0, 28.0, 45.0)
 
     # --- Tree health points ---
-    tree_health_geojson_file: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/TreeHealth/tree_health.geojson"
-    )
+    tree_health_geojson_file: Path = APP_SERVER_ROOT / "TreeHealth" / "tree_health.geojson"
     tree_health_layer_name: str = "Tree Health"
     tree_health_point_radius: float = 6.0
     tree_health_fill_opacity: float = 0.75
@@ -142,25 +153,20 @@ class Config:
     popup_offset_ratio: float = 0.1
 
     # --- Date Palm Fields Qassim Manual (Qassim) — single GeoPackage file ---
-    datepalms_gpkg_file: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms/Qassim_datepalm_fields_polygons.gpkg"
-    )
-    datepalms_geojson_file: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms/Qassim_datepalm_fields_polygons.geojson"
-    )
-    datepalms_http_base: str = os.environ.get("DATEPALMS_HTTP_BASE", "/static/assets/datepalms")
-    datepalms_http_url: str = os.environ.get("DATEPALMS_HTTP_URL", "/static/assets/datepalms/Qassim_datepalm_fields_polygons.geojson")
+    datepalms_gpkg_file: Path = APP_SERVER_ROOT / "datepalms" / "Qassim_datepalm_fields_polygons.gpkg"
+    datepalms_geojson_file: Path = APP_SERVER_ROOT / "datepalms" / "Qassim_datepalm_fields_polygons.geojson"
+    datepalms_http_base: str = os.environ.get("DATEPALMS_HTTP_BASE", f"{ASSET_BASE_URL}/datepalms")
+    datepalms_http_url: str = os.environ.get("DATEPALMS_HTTP_URL", f"{ASSET_BASE_URL}/datepalms/Qassim_datepalm_fields_polygons.geojson")
+    datepalms_public_http_base: str = os.environ.get("DATEPALMS_PUBLIC_HTTP_BASE", f"{PUBLIC_ASSET_BASE_URL}/datepalms")
+    datepalms_public_http_url: str = os.environ.get("DATEPALMS_PUBLIC_HTTP_URL", f"{PUBLIC_ASSET_BASE_URL}/datepalms/Qassim_datepalm_fields_polygons.geojson")
     datepalms_layer_name: str = "Date Palm Fields Qassim Manual"
     datepalms_enabled: bool = True
     sensor_opacity_default: float = 1.0
     datepalms_simplify_tolerance: float | None = 0.0008
-    datepalms_province_dir: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_per_province"
-    )
-    datepalms_province_http_base: str = os.environ.get("DATEPALMS_PROVINCE_HTTP_BASE", "/static/assets/datepalms_per_province")
-    datepalms_tile_cache_dir: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_tile_cache"
-    )
+    datepalms_province_dir: Path = APP_SERVER_ROOT / "datepalms_per_province"
+    datepalms_province_http_base: str = os.environ.get("DATEPALMS_PROVINCE_HTTP_BASE", f"{ASSET_BASE_URL}/datepalms_per_province")
+    datepalms_province_public_http_base: str = os.environ.get("DATEPALMS_PROVINCE_PUBLIC_HTTP_BASE", f"{PUBLIC_ASSET_BASE_URL}/datepalms_per_province")
+    datepalms_tile_cache_dir: Path = APP_SERVER_ROOT / "datepalms_tile_cache"
     datepalms_province_fill_color: str = "#64ff11"
     datepalms_province_edge_color: str = "#5ea700"
     datepalms_province_edge_weight: float = 2.0
@@ -169,12 +175,8 @@ class Config:
     datepalms_province_simplify_tolerance: float = 0.0015
     datepalms_tile_zoom_threshold: int = 16
     datepalms_tile_layer_name: str = "Date Palm Fields"
-    datepalms_tiles_dir: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_tiles"
-    )
-    datepalms_province_lookup_json: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_provinces.json"
-    )
+    datepalms_tiles_dir: Path = APP_SERVER_ROOT / "datepalms_tiles"
+    datepalms_province_lookup_json: Path = APP_SERVER_ROOT / "datepalms_provinces.json"
     datepalms_province_names: tuple[str, ...] = (
         "Al_Bahah",
         "Al_Jawf",
@@ -191,11 +193,11 @@ class Config:
         "Tabuk",
     )
     # --- KSA bounds polygon 
-    ksa_bounds_gpkg: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/ksa_bounds/KSA_provincebounds.gpkg"
-    )
-    ksa_bounds_http_base: str = os.environ.get("KSA_BOUNDS_HTTP_BASE", "/static/assets/ksa_bounds")
-    ksa_bounds_http_url: str = os.environ.get("KSA_BOUNDS_HTTP_URL", "/static/assets/ksa_bounds/KSA_provincebounds.gpkg")
+    ksa_bounds_gpkg: Path = APP_SERVER_ROOT / "ksa_bounds" / "KSA_provincebounds.gpkg"
+    ksa_bounds_http_base: str = os.environ.get("KSA_BOUNDS_HTTP_BASE", f"{ASSET_BASE_URL}/ksa_bounds")
+    ksa_bounds_http_url: str = os.environ.get("KSA_BOUNDS_HTTP_URL", f"{ASSET_BASE_URL}/ksa_bounds/KSA_provincebounds.gpkg")
+    ksa_bounds_public_http_base: str = os.environ.get("KSA_BOUNDS_PUBLIC_HTTP_BASE", f"{PUBLIC_ASSET_BASE_URL}/ksa_bounds")
+    ksa_bounds_public_http_url: str = os.environ.get("KSA_BOUNDS_PUBLIC_HTTP_URL", f"{PUBLIC_ASSET_BASE_URL}/ksa_bounds/KSA_provincebounds.gpkg")
     ksa_bounds_layer_source: str = "KSA_provincebounds"
     
     ksa_bounds_layer_name: str = "KSA bounds"
@@ -203,13 +205,15 @@ class Config:
     ksa_bounds_edge_weight: float = 1.5
     ksa_bounds_hover_weight: float = 2.0
     # --- Date palm polygon 
-    datepalms_tile_base_url: str = os.environ.get("DATEPALMS_TILE_BASE_URL", "/static/assets/datepalms_tiles")
+    datepalms_tile_base_url: str = os.environ.get("DATEPALMS_TILE_BASE_URL", f"{ASSET_BASE_URL}/datepalms_tiles")
+    datepalms_tile_public_base_url: str = os.environ.get(
+        "DATEPALMS_TILE_PUBLIC_BASE_URL",
+        PUBLIC_DATEPALMS_TILE_BASE_URL,
+    )
     datepalms_tile_url_template: str = "{base}/{province}/{z}/{x}/{y}.pbf"
     datepalms_tiles_max_zoom: int = 17
     # --- Field density
-    field_density_dir: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/datepalms_density"
-    )
+    field_density_dir: Path = APP_SERVER_ROOT / "datepalms_density"
     field_density_layer_name: str = "Field density"
     field_density_default_opacity: float = 0.78
     field_density_legend_title: str = "Date palm coverage \n (km<sup>2</sup> per 25 km<sup>2</sup> cell)"
@@ -227,8 +231,6 @@ class Config:
     raster_tile_min_zoom: int = int(os.environ.get("RASTER_TILE_MIN_ZOOM", "0"))
     raster_tile_max_zoom_default: int = int(os.environ.get("RASTER_TILE_MAX_ZOOM", "14"))
 
-    datepalms_national_figure_file: Path = Path(
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/Figs/FieldAcreageByProvince.png"
-    )
+    datepalms_national_figure_file: Path = APP_SERVER_ROOT / "Figs" / "FieldAcreageByProvince.png"
 
 CFG = Config()

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import ipyleaflet
 
 from functions.geoportal.v14.config import CFG
-from functions.geoportal.v14.cloud_assets import ensure_local_asset
+from functions.geoportal.v14.cloud_assets import ensure_local_asset, force_gcs_enabled
 from functions.geoportal.v14.popups import show_popup
 
 BBox = Tuple[float, float, float, float]  # (south, west, north, east)
@@ -96,7 +96,12 @@ def build_center_pivot_layer(
     # ---- build the base layer (URL or clipped local) ----
     if use_http_url and clip_to_bbox is None:
         # Fast path: browser fetches the full file
-        url = f"{CFG.center_pivot_http_base}/{_year_to_filename(year)}"
+        http_base = getattr(
+            CFG,
+            "center_pivot_public_http_base" if force_gcs_enabled() else "center_pivot_http_base",
+            "",
+        ).rstrip("/")
+        url = f"{http_base}/{_year_to_filename(year)}"
         layer = ipyleaflet.GeoJSON(
             url=url,
             name=name,

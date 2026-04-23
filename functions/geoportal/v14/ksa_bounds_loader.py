@@ -14,7 +14,7 @@ import geopandas as gpd
 import ipyleaflet
 
 from functions.geoportal.v14.config import CFG
-from functions.geoportal.v14.cloud_assets import ensure_local_asset
+from functions.geoportal.v14.cloud_assets import ensure_local_asset, force_gcs_enabled
 
 
 def _normalize_name(name: str) -> str:
@@ -70,7 +70,11 @@ def _format_area_label(name: str | None) -> str | None:
 
 def _load_gdf() -> gpd.GeoDataFrame:
     gpkg_path = getattr(CFG, "ksa_bounds_gpkg", None)
-    http_url = getattr(CFG, "ksa_bounds_http_url", None)
+    http_url = getattr(
+        CFG,
+        "ksa_bounds_public_http_url" if force_gcs_enabled() else "ksa_bounds_http_url",
+        None,
+    )
 
     if gpkg_path:
         path = ensure_local_asset(Path(gpkg_path))

@@ -30,6 +30,14 @@ DEFAULT_GCLOUD_BIN = os.environ.get(
 CACHE_ROOT = Path(tempfile.gettempdir()) / "geoportal_asset_cache"
 CACHE_ROOT.mkdir(parents=True, exist_ok=True)
 _FORCE_GCS = os.environ.get("FORCE_GCS", "").strip().lower() in {"1", "true", "yes", "on"}
+_LAST_FETCH_INFO = {
+    "path": None,
+    "source": None,
+    "resolved_path": None,
+    "object_name": None,
+    "mode": None,
+    "detail": None,
+}
 
 
 def gcs_enabled() -> bool:
@@ -45,16 +53,38 @@ def set_force_gcs(enabled: bool) -> None:
     _FORCE_GCS = bool(enabled)
 
 
+def _record_fetch(path: str | Path, source: str, *, resolved_path: str | None = None, detail: str | None = None) -> None:
+    global _LAST_FETCH_INFO
+    try:
+        object_name = object_name_for_path(path)
+    except Exception:
+        object_name = None
+    _LAST_FETCH_INFO = {
+        "path": str(path),
+        "source": source,
+        "resolved_path": resolved_path,
+        "object_name": object_name,
+        "mode": "force_gcs" if force_gcs_enabled() else "local_first",
+        "detail": detail,
+    }
+
+
+def last_fetch_info() -> dict:
+    return dict(_LAST_FETCH_INFO)
+
+
 def use_service_account_json() -> bool:
     return bool(os.environ.get("GCP_SERVICE_ACCOUNT_JSON"))
 
 
 @lru_cache(maxsize=1)
 def get_gcs_client() -> storage.Client:
-    raw = os.environ["GCP_SERVICE_ACCOUNT_JSON"]
-    info = json.loads(raw)
-    credentials = service_account.Credentials.from_service_account_info(info)
-    return storage.Client(project=info["project_id"], credentials=credentials)
+    if use_service_account_json():
+        raw = os.environ["GCP_SERVICE_ACCOUNT_JSON"]
+        info = json.loads(raw)
+        credentials = service_account.Credentials.from_service_account_info(info)
+        return storage.Client(project=info["project_id"], credentials=credentials)
+    return storage.Client()
 
 
 @lru_cache(maxsize=1)
@@ -85,8 +115,11 @@ def _rel_asset_path(path: str | Path) -> Path:
     if p.is_absolute():
         try:
             return p.relative_to(local_asset_root())
-        except Exception as exc:
-            raise ValueError(f"Path {p} is outside LOCAL_ASSET_ROOT={local_asset_root()}") from exc
+        except Exception:
+            try:
+                return p.relative_to(CACHE_ROOT)
+            except Exception as exc:
+                raise ValueError(f"Path {p} is outside LOCAL_ASSET_ROOT={local_asset_root()}") from exc
     return p
 
 
@@ -148,24 +181,33 @@ def _gcloud_download_bytes(path: str | Path) -> bytes:
 def ensure_local_asset(path: str | Path) -> Path:
     p = local_path_for(path)
     if not force_gcs_enabled() and p.exists():
+        _record_fetch(path, "local", resolved_path=str(p))
         return p
     if not gcs_enabled():
+        _record_fetch(path, "local-missing-gcs-disabled", resolved_path=str(p))
         return p
 
     target = cached_path_for(path)
     if target.exists():
+        _record_fetch(path, "cache", resolved_path=str(target))
         return target
 
-    if use_service_account_json():
+    try:
         blob = get_bucket().blob(object_name_for_path(path))
         if not blob.exists():
+            _record_fetch(path, "gcs-missing", resolved_path=str(p))
             return p
         target.parent.mkdir(parents=True, exist_ok=True)
         blob.download_to_filename(str(target))
+        _record_fetch(path, "gcs-download", resolved_path=str(target), detail="google-cloud-storage")
         return target
-
-    ok = _gcloud_download_file(path, target)
-    return target if ok else p
+    except Exception:
+        ok = _gcloud_download_file(path, target)
+        if ok:
+            _record_fetch(path, "gcs-download", resolved_path=str(target), detail="gcloud")
+        else:
+            _record_fetch(path, "gcs-download-failed", resolved_path=str(target), detail="gcloud")
+        return target if ok else p
 
 
 def ensure_local_directory(path: str | Path, suffixes: Iterable[str] | None = None) -> Path:
@@ -181,7 +223,7 @@ def ensure_local_directory(path: str | Path, suffixes: Iterable[str] | None = No
     suffixes = tuple(suffixes or ())
     found = False
 
-    if use_service_account_json():
+    try:
         blob_prefix = object_name_for_path(path).rstrip("/") + "/"
         for blob in get_bucket().list_blobs(prefix=blob_prefix):
             rel_name = blob.name[len(blob_prefix):]
@@ -196,29 +238,26 @@ def ensure_local_directory(path: str | Path, suffixes: Iterable[str] | None = No
             dst.parent.mkdir(parents=True, exist_ok=True)
             blob.download_to_filename(str(dst))
         return target_dir if found else p
-
-    try:
+    except Exception:
         result = _run_gcloud(["storage", "ls", "--recursive", prefix], capture_output=True)
         lines = result.stdout.decode("utf-8", errors="ignore").splitlines()
-    except subprocess.CalledProcessError:
-        return p
-
-    for line in lines:
-        uri = line.strip()
-        if not uri or uri.endswith("/"):
-            continue
-        rel_name = uri[len(prefix):]
-        if suffixes and not rel_name.lower().endswith(tuple(s.lower() for s in suffixes)):
-            continue
-        found = True
-        dst = target_dir / rel_name
-        if dst.exists():
-            continue
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            _run_gcloud(["storage", "cp", uri, str(dst)])
-        except subprocess.CalledProcessError:
-            pass
+        for line in lines:
+            uri = line.strip()
+            if not uri or uri.endswith("/"):
+                continue
+            rel_name = uri[len(prefix):]
+            if suffixes and not rel_name.lower().endswith(tuple(s.lower() for s in suffixes)):
+                continue
+            found = True
+            dst = target_dir / rel_name
+            if dst.exists():
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                _run_gcloud(["storage", "cp", uri, str(dst)])
+            except subprocess.CalledProcessError:
+                pass
+        return target_dir if found else p
 
     return target_dir if found else p
 
@@ -232,45 +271,51 @@ def list_directory_names(path: str | Path, suffix: str) -> list[str]:
 
     names: list[str] = []
 
-    if use_service_account_json():
+    try:
         prefix = object_name_for_path(path).rstrip("/") + "/"
         for blob in get_bucket().list_blobs(prefix=prefix):
             name = Path(blob.name).name
             if name.lower().endswith(suffix.lower()):
                 names.append(Path(name).stem)
         return sorted(set(names))
-
-    prefix = gcs_uri_for_path(path).rstrip("/") + "/"
-    try:
+    except Exception:
+        prefix = gcs_uri_for_path(path).rstrip("/") + "/"
         result = _run_gcloud(["storage", "ls", "--recursive", prefix], capture_output=True)
         lines = result.stdout.decode("utf-8", errors="ignore").splitlines()
-    except subprocess.CalledProcessError:
-        return []
-
-    for line in lines:
-        name = Path(line.strip()).name
-        if name.lower().endswith(suffix.lower()):
-            names.append(Path(name).stem)
+        for line in lines:
+            name = Path(line.strip()).name
+            if name.lower().endswith(suffix.lower()):
+                names.append(Path(name).stem)
 
     return sorted(set(names))
 
 
 def read_asset_bytes(path: str | Path) -> bytes:
     if force_gcs_enabled() and gcs_enabled():
-        if use_service_account_json():
+        try:
             blob = get_bucket().blob(object_name_for_path(path))
-            return blob.download_as_bytes()
-        return _gcloud_download_bytes(path)
+            data = blob.download_as_bytes()
+            _record_fetch(path, "gcs-bytes", resolved_path=gcs_uri_for_path(path), detail="google-cloud-storage")
+            return data
+        except Exception:
+            data = _gcloud_download_bytes(path)
+            _record_fetch(path, "gcs-bytes", resolved_path=gcs_uri_for_path(path), detail="gcloud")
+            return data
 
     local = ensure_local_asset(path)
     if local.exists():
+        _record_fetch(path, "local-bytes", resolved_path=str(local))
         return local.read_bytes()
 
-    if use_service_account_json():
+    try:
         blob = get_bucket().blob(object_name_for_path(path))
-        return blob.download_as_bytes()
-
-    return _gcloud_download_bytes(path)
+        data = blob.download_as_bytes()
+        _record_fetch(path, "gcs-bytes", resolved_path=gcs_uri_for_path(path), detail="google-cloud-storage")
+        return data
+    except Exception:
+        data = _gcloud_download_bytes(path)
+        _record_fetch(path, "gcs-bytes", resolved_path=gcs_uri_for_path(path), detail="gcloud")
+        return data
 
 
 def asset_url_for(path: str | Path) -> str:

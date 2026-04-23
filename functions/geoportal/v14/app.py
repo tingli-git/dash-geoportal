@@ -60,11 +60,12 @@ from functions.geoportal.v14.field_density_loader import build_field_density_lay
 from functions.geoportal.v14.lookup import FieldLookup
 from functions.geoportal.v14.popups import show_popup, clear_tree_health_badge, clear_sensor_badges
 from functions.geoportal.v14.utils import html_table_popup
-from functions.geoportal.v14.cloud_assets import asset_url_for, ensure_local_asset, ensure_local_directory, read_asset_bytes, guess_content_type, gcs_enabled, force_gcs_enabled, set_force_gcs
+from functions.geoportal.v14.cloud_assets import asset_url_for, ensure_local_asset, ensure_local_directory, read_asset_bytes, guess_content_type, gcs_enabled, force_gcs_enabled, set_force_gcs, last_fetch_info
 
 _GPKG_TEMP_DIR = Path(tempfile.gettempdir()) / "geoportal_datepalm"
 _GPKG_TEMP_DIR.mkdir(parents=True, exist_ok=True)
-_APP_SERVER_ROOT = CFG.top_dir / "Datepalm" / "app_server"
+IS_PRODUCTION = getattr(CFG, "app_mode", "development") == "production"
+_APP_SERVER_ROOT = getattr(CFG, "app_server_root", CFG.top_dir / "Datepalm" / "app_server")
 _ORIGINAL_ASSET_DIRECTORIES = solara_server.asset_directories
 
 
@@ -75,7 +76,8 @@ def _asset_directories_with_app_server():
     return directories
 
 
-solara_server.asset_directories = _asset_directories_with_app_server
+if not IS_PRODUCTION:
+    solara_server.asset_directories = _asset_directories_with_app_server
 
 
 # -------------------------
@@ -83,6 +85,7 @@ solara_server.asset_directories = _asset_directories_with_app_server
 # -------------------------
 API_PREFIX = "/api"
 backend_api = FastAPI()
+GCS_ASSET_PROXY_PREFIX = "/gcs-assets"
 
 @backend_api.get("/ping")
 def ping():
@@ -103,17 +106,43 @@ def serve_asset(asset_path: str):
     }
     return Response(data, media_type=media_type, headers=headers)
 
+
+@solara_app.get(GCS_ASSET_PROXY_PREFIX + "/{asset_path:path}")
+def serve_gcs_asset(asset_path: str):
+    previous = force_gcs_enabled()
+    try:
+        set_force_gcs(True)
+        data = read_asset_bytes(asset_path)
+    except Exception as exc:
+        return PlainTextResponse(f"Not found: {asset_path} ({exc})", status_code=404)
+    finally:
+        set_force_gcs(previous)
+
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=3600",
+        "X-Geoportal-Route": "gcs-assets",
+        "X-Geoportal-Asset-Path": asset_path,
+        "X-Geoportal-Mode": "force-gcs",
+    }
+    media_type = guess_content_type(asset_path)
+    return Response(data, media_type=media_type, headers=headers)
+
 solara_app.mount(API_PREFIX, backend_api)
 
 
 def _prioritize_api_mount() -> None:
     try:
         routes = list(solara_app.router.routes)
-        api_mounts = [route for route in routes if getattr(route, "path", None) == API_PREFIX]
-        if not api_mounts:
+        front_paths = {
+            API_PREFIX,
+            GCS_ASSET_PROXY_PREFIX + "/{asset_path:path}",
+        }
+        priority_routes = [route for route in routes if getattr(route, "path", None) in front_paths]
+        if not priority_routes:
             return
-        remaining = [route for route in routes if getattr(route, "path", None) != API_PREFIX]
-        solara_app.router.routes[:] = api_mounts + remaining
+        remaining = [route for route in routes if getattr(route, "path", None) not in front_paths]
+        solara_app.router.routes[:] = priority_routes + remaining
     except Exception:
         pass
 
@@ -506,16 +535,14 @@ def Page():
     # UI state
     geojson_path, set_geojson_path = solara.use_state(str(CFG.default_geojson))
     force_gcs, set_force_gcs_state = solara.use_state(force_gcs_enabled())
+    fetch_debug_tick, set_fetch_debug_tick = solara.use_state(0)
     debounced_geojson = use_debounce(geojson_path, delay_ms=500)
     refs = ReactiveRefs()
     ## turn off the below two line if not showing as page at the bottom of the map window
     #ts_title, set_ts_title = solara.use_state("")
     #ts_df, set_ts_df = solara.use_state(None)
 
-    default_tiles_dir = str(getattr(
-        CFG, "default_tiles_dir",
-        "/datawaha/esom/DatePalmCounting/Geoportal/Datepalm/app_server/38RLQ_2024"
-    ))
+    default_tiles_dir = str(getattr(CFG, "default_tiles_dir", _APP_SERVER_ROOT / "38RLQ_2024"))
     raster_dir, set_raster_dir = solara.use_state(default_tiles_dir)
     debounced_raster_dir = use_debounce(raster_dir, delay_ms=350)
     raster_opacity, set_raster_opacity = solara.use_state(float(getattr(CFG, "raster_opacity_default", 0.75)))
@@ -626,6 +653,11 @@ def Page():
         set_force_gcs(force_gcs)
 
     solara.use_effect(_sync_force_gcs, [force_gcs])
+
+    def _refresh_fetch_debug():
+        set_fetch_debug_tick(lambda current: current + 1)
+
+    solara.use_effect(_refresh_fetch_debug, [active_product, force_gcs, selected_date_palm_province, current_zoom, loading_message])
 
     def _attach_map_debug():
         if map_debug_attached.current:
@@ -773,7 +805,11 @@ def Page():
             return None, None
         base_dir = Path(getattr(CFG, "datepalms_province_dir", ""))
         local = ensure_local_asset(base_dir / f"{province}.geojson") if base_dir else None
-        http_base = getattr(CFG, "datepalms_province_http_base", "").rstrip("/")
+        http_base = getattr(
+            CFG,
+            "datepalms_province_public_http_base" if force_gcs else "datepalms_province_http_base",
+            "",
+        ).rstrip("/")
         remote = f"{http_base}/{province}.geojson" if http_base else None
         return (local if local and local.exists() else None), remote
 
@@ -795,9 +831,14 @@ def Page():
         return None
 
     def _tile_url_for_province(province: str) -> str:
+        base_url = (
+            getattr(CFG, "datepalms_tile_public_base_url", CFG.datepalms_tile_base_url)
+            if force_gcs
+            else CFG.datepalms_tile_base_url
+        )
         return (
             CFG.datepalms_tile_url_template
-            .replace("{base}", CFG.datepalms_tile_base_url)
+            .replace("{base}", base_url)
             .replace("{province}", province)
         )
 
@@ -1615,11 +1656,20 @@ def Page():
     def _on_tiles_folder_change():
         if active_product != PRODUCT_TREE_VEGE:
             return
-        folder = ensure_local_directory(Path(debounced_raster_dir), suffixes=(".png", ".jpg", ".jpeg")).resolve()
+        folder = (
+            Path(debounced_raster_dir).resolve()
+            if IS_PRODUCTION
+            else ensure_local_directory(Path(debounced_raster_dir), suffixes=(".png", ".jpg", ".jpeg")).resolve()
+        )
         if folder.exists():
             ext = _detect_extension(folder) or "png"
             _zmin, _zmax = _detect_zoom_range(folder)
             bounds = _leaflet_bounds_from_xyz(folder, _zmax) if _zmax is not None else None
+        elif IS_PRODUCTION:
+            ext = getattr(CFG, "raster_tile_ext", "png")
+            _zmin = int(getattr(CFG, "raster_tile_min_zoom", 0))
+            _zmax = int(getattr(CFG, "raster_tile_max_zoom_default", 14))
+            bounds = None
         else:
             if not gcs_enabled():
                 show_toast(f"Tiles folder not found: {folder}", "warning")
@@ -1645,8 +1695,13 @@ def Page():
         if active_product != PRODUCT_TREE_VEGE:
             return None
         cache_buster = abs(hash(debounced_raster_dir)) % (10**8)
+        tile_base = (
+            getattr(CFG, "tiles_public_http_base", TILES_HTTP_BASE)
+            if force_gcs
+            else TILES_HTTP_BASE
+        )
         layer = ipyleaflet.TileLayer(
-            url=f"{TILES_HTTP_BASE}/{{z}}/{{x}}/{{y}}.{tile_ext}?v={cache_buster}",
+            url=f"{tile_base}/{{z}}/{{x}}/{{y}}.{tile_ext}?v={cache_buster}",
             name=str(getattr(CFG, "raster_layer_name", "Raster")),
             opacity=float(raster_opacity),
             min_zoom=0 if zmin is None else min(0, zmin),
@@ -1662,7 +1717,7 @@ def Page():
             pass
         return layer
 
-    raster_layer = solara.use_memo(_build_raster_layer, [debounced_raster_dir, tile_ext, raster_opacity, zmin, zmax, active_product])
+    raster_layer = solara.use_memo(_build_raster_layer, [debounced_raster_dir, tile_ext, raster_opacity, zmin, zmax, active_product, force_gcs])
 
     def _render_raster_layer():
         if raster_layer is None:
@@ -1809,6 +1864,7 @@ def Page():
             raster_layer,
             date_palm_tile_layers,
             current_zoom,
+            force_gcs,
         ],
     )
 
@@ -2600,13 +2656,36 @@ def Page():
                 style={"alignItems": "center", "marginBottom": "0.75rem", "flexWrap": "wrap"},
             ):
                 solara.Switch(
-                    label="Force GCS for server-side asset reads",
+                    label="Force GCS for server-side asset reads" + (" (tiles stay external in production)" if IS_PRODUCTION else ""),
                     value=force_gcs,
                     on_value=set_force_gcs_state,
                 )
                 solara.Markdown(
                     f"`Mode:` {'GCS only for direct asset reads' if force_gcs else 'Local first, GCS fallback'}",
                     style={"fontSize": "0.95rem", "color": "#475569", "margin": "0"},
+                )
+                solara.Markdown(
+                    f"`Deploy:` {'production' if IS_PRODUCTION else 'development'}",
+                    style={"fontSize": "0.95rem", "color": "#475569", "margin": "0"},
+                )
+            fetch_info = last_fetch_info()
+            with solara.Card(
+                "",
+                style={"padding": "0.5rem 0.75rem", "marginBottom": "0.75rem", "background": "rgba(248,250,252,0.7)"},
+            ):
+                solara.Markdown("**Last Asset Fetch**", style={"fontSize": "1.0rem", "margin": "0 0 0.35rem 0", "color": "#334155"})
+                solara.Markdown(
+                    "\n".join(
+                        [
+                            f"`mode:` {fetch_info.get('mode') or '-'}",
+                            f"`source:` {fetch_info.get('source') or '-'}",
+                            f"`path:` {fetch_info.get('path') or '-'}",
+                            f"`resolved:` {fetch_info.get('resolved_path') or '-'}",
+                            f"`object:` {fetch_info.get('object_name') or '-'}",
+                            f"`detail:` {fetch_info.get('detail') or '-'}",
+                        ]
+                    ),
+                    style={"fontSize": "0.88rem", "margin": "0", "color": "#475569"},
                 )
             # Product buttons let the user switch between map layers / analytics products.
             with solara.Row(
