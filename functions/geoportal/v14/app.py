@@ -76,8 +76,10 @@ def _asset_directories_with_app_server():
     return directories
 
 
-if not IS_PRODUCTION:
-    solara_server.asset_directories = _asset_directories_with_app_server
+# Local mode depends on Solara serving files from app_server under /static/assets.
+# Keep that mount available in all modes so the UI toggle can genuinely switch
+# between local browser URLs and public/GCS browser URLs.
+solara_server.asset_directories = _asset_directories_with_app_server
 
 
 # -------------------------
