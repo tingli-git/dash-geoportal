@@ -34,6 +34,7 @@ from fastapi import FastAPI
 
 from starlette.responses import PlainTextResponse, Response
 from solara.server.fastapi import app as solara_app
+from solara.server import server as solara_server
 
 from functions.geoportal.v14.config import CFG
 from functions.geoportal.v14.state import ReactiveRefs
@@ -63,6 +64,18 @@ from functions.geoportal.v14.cloud_assets import asset_url_for, ensure_local_ass
 
 _GPKG_TEMP_DIR = Path(tempfile.gettempdir()) / "geoportal_datepalm"
 _GPKG_TEMP_DIR.mkdir(parents=True, exist_ok=True)
+_APP_SERVER_ROOT = CFG.top_dir / "Datepalm" / "app_server"
+_ORIGINAL_ASSET_DIRECTORIES = solara_server.asset_directories
+
+
+def _asset_directories_with_app_server():
+    directories = list(_ORIGINAL_ASSET_DIRECTORIES())
+    if _APP_SERVER_ROOT not in directories:
+        directories.insert(0, _APP_SERVER_ROOT)
+    return directories
+
+
+solara_server.asset_directories = _asset_directories_with_app_server
 
 
 # -------------------------
@@ -93,10 +106,25 @@ def serve_asset(asset_path: str):
 solara_app.mount(API_PREFIX, backend_api)
 
 
+def _prioritize_api_mount() -> None:
+    try:
+        routes = list(solara_app.router.routes)
+        api_mounts = [route for route in routes if getattr(route, "path", None) == API_PREFIX]
+        if not api_mounts:
+            return
+        remaining = [route for route in routes if getattr(route, "path", None) != API_PREFIX]
+        solara_app.router.routes[:] = api_mounts + remaining
+    except Exception:
+        pass
+
+
+_prioritize_api_mount()
+
+
 # -------------------------
 # External tiles server base (manual)
 # -------------------------
-TILES_HTTP_BASE: str = getattr(CFG, "tiles_http_base", "/api/assets/38RLQ_2024")
+TILES_HTTP_BASE: str = getattr(CFG, "tiles_http_base", "/static/assets/38RLQ_2024")
 
 PRODUCT_TREE_VEGE = "tree_vege"
 PRODUCT_DATEPALM = "datepalm"

@@ -21,7 +21,7 @@ DEFAULT_LOCAL_ASSET_ROOT = Path(
 )
 DEFAULT_GCS_BUCKET_NAME = "ksa_datepalm"
 DEFAULT_GCS_ASSET_PREFIX = "app_server"
-DEFAULT_APP_ASSET_BASE_URL = "/api/assets"
+DEFAULT_APP_ASSET_BASE_URL = "/static/assets"
 DEFAULT_GCLOUD_BIN = os.environ.get(
     "GCLOUD_BIN",
     "/rhome/lit0a/google-cloud-sdk/bin/gcloud",
@@ -80,6 +80,13 @@ def _rel_asset_path(path: str | Path) -> Path:
     return p
 
 
+def local_path_for(path: str | Path) -> Path:
+    p = Path(path)
+    if p.is_absolute():
+        return p
+    return local_asset_root() / p
+
+
 def object_name_for_path(path: str | Path) -> str:
     rel = _rel_asset_path(path).as_posix().lstrip("/")
     prefix = asset_prefix()
@@ -129,7 +136,7 @@ def _gcloud_download_bytes(path: str | Path) -> bytes:
 
 
 def ensure_local_asset(path: str | Path) -> Path:
-    p = Path(path)
+    p = local_path_for(path)
     if p.exists():
         return p
     if not gcs_enabled():
@@ -152,7 +159,7 @@ def ensure_local_asset(path: str | Path) -> Path:
 
 
 def ensure_local_directory(path: str | Path, suffixes: Iterable[str] | None = None) -> Path:
-    p = Path(path)
+    p = local_path_for(path)
     if p.is_dir():
         return p
     if not gcs_enabled():
@@ -207,7 +214,7 @@ def ensure_local_directory(path: str | Path, suffixes: Iterable[str] | None = No
 
 
 def list_directory_names(path: str | Path, suffix: str) -> list[str]:
-    p = Path(path)
+    p = local_path_for(path)
     if p.is_dir():
         return sorted(x.stem for x in p.glob(f"*{suffix}"))
     if not gcs_enabled():
@@ -258,7 +265,7 @@ def asset_url_for(path: str | Path) -> str:
 def guess_content_type(path: str | Path, fallback: str | None = None) -> str:
     p = str(path)
     if p.endswith(".pbf"):
-        return "application/x-protobuf"
+        return "application/vnd.mapbox-vector-tile"
     if p.endswith(".mvt"):
         return "application/vnd.mapbox-vector-tile"
     guessed, _ = mimetypes.guess_type(p)
