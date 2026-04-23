@@ -29,6 +29,8 @@ class Config:
     top_dir: Path = TOP_DIR
     app_mode: str = APP_MODE
     app_server_root: Path = APP_SERVER_ROOT
+    auth_username: str = os.environ.get("GEOPORTAL_AUTH_USERNAME", "").strip()
+    auth_password: str = os.environ.get("GEOPORTAL_AUTH_PASSWORD", "").strip()
     default_geojson: Path = APP_SERVER_ROOT / "Aldka" / "SensorInfos" / "AldakaSensors.geojson"
     map_center: tuple[float, float] = (24.0, 45.0)
     map_zoom: int = 6

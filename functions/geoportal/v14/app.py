@@ -527,12 +527,92 @@ def _product_summary(product: str):
     return solara.Div()
 
 
+def _auth_enabled() -> bool:
+    return bool(getattr(CFG, "auth_username", "")) and bool(getattr(CFG, "auth_password", ""))
+
+
+@solara.component
+def _LoginGate(on_success):
+    username, set_username = solara.use_state("")
+    password, set_password = solara.use_state("")
+    error_message, set_error_message = solara.use_state("")
+
+    def _submit():
+        expected_username = getattr(CFG, "auth_username", "")
+        expected_password = getattr(CFG, "auth_password", "")
+        if username == expected_username and password == expected_password:
+            set_error_message("")
+            on_success()
+            return
+        set_error_message("Invalid username or password.")
+
+    with solara.Column(
+        gap="1rem",
+        style={
+            "minHeight": "80vh",
+            "alignItems": "center",
+            "justifyContent": "center",
+            "padding": "2rem 1rem",
+        },
+    ):
+        with solara.Card(
+            "Sign In",
+            style={
+                "width": "100%",
+                "maxWidth": "420px",
+                "padding": "1.25rem",
+                "background": "rgba(255,255,255,0.92)",
+            },
+        ):
+            solara.Markdown(
+                "Enter your username and password to access the geoportal.",
+                style={"fontSize": "0.95rem", "color": "#475569", "marginBottom": "0.75rem"},
+            )
+            solara.InputText(
+                "Username",
+                value=username,
+                on_value=set_username,
+                continuous_update=True,
+                autofocus=True,
+                placeholder="Enter username",
+                classes=["geoportal-login-field"],
+                style={"width": "100%"},
+            )
+            solara.InputText(
+                "Password",
+                value=password,
+                on_value=set_password,
+                continuous_update=True,
+                password=True,
+                placeholder="Enter password",
+                classes=["geoportal-login-field"],
+                style={"width": "100%"},
+            )
+            if error_message:
+                solara.Markdown(
+                    error_message,
+                    style={"fontSize": "0.9rem", "color": "#b91c1c", "marginTop": "0.5rem"},
+                )
+            solara.Button(
+                label="Sign In",
+                on_click=_submit,
+                color="success",
+                classes=["geoportal-login-button"],
+                style={"width": "100%", "marginTop": "0.75rem"},
+            )
+
+
 # -------------------------
 # Main Solara page
 # -------------------------
 @solara.component
 def Page():
     show_toast, hide_toast, toast_state = use_toast()
+    authenticated, set_authenticated = solara.use_state(not _auth_enabled())
+
+    if not authenticated:
+        _LoginGate(lambda: set_authenticated(True))
+        return
 
     # UI state
     geojson_path, set_geojson_path = solara.use_state(str(CFG.default_geojson))
