@@ -1672,6 +1672,9 @@ def Page():
     def _on_cp_year_change(value):
         _refresh_cp_layer()
         set_cp_year_index(value)
+        bounds = _roi_to_bounds(getattr(CFG, "center_pivot_default_roi", None))
+        if bounds:
+            _fit_bounds(bounds)
 
     def _render_cp_year_buttons():
         buttons = []
