@@ -226,6 +226,7 @@ PRODUCT_DEFAULT_ZOOM = {
     PRODUCT_SENSORS: 16,
     PRODUCT_DATEPALM_FIELDS: 6,
     PRODUCT_FIELD_DENSITY: 6,
+    PRODUCT_TREE_VEGE: 9,
 }
 
 
@@ -710,7 +711,10 @@ def Page():
     tile_bounds, set_tile_bounds = solara.use_state(None)
 
     # --- Center-Pivot state ---
-    years = list(getattr(CFG, "center_pivot_years", (2021,)))
+    years = sorted(
+            list(getattr(CFG, "center_pivot_years", (2021,))),
+            reverse=True,
+        )
     year_index_map = {i: y for i, y in enumerate(years)}
     index_by_year = {y: i for i, y in enumerate(years)}
 
@@ -767,6 +771,7 @@ def Page():
     loading_message, set_loading_message = solara.use_state(None)
     loading_product_ref = solara.use_ref(None)
     active_product_ref = solara.use_ref(None)
+    default_national_applied_ref = solara.use_ref(False)
 
 
     def _loading_badge():
@@ -881,6 +886,29 @@ def Page():
                 show_toast(str(exc), "error")
 
     solara.use_effect(_ensure_product_metadata, [active_product, province_names, field_lookup])
+    
+    def _default_national_first_time_only():
+        if default_national_applied_ref.current:
+            return
+        if active_product != PRODUCT_DATEPALM_FIELDS:
+            return
+        if selected_date_palm_province is not None:
+            default_national_applied_ref.current = True
+            return
+
+        set_selected_date_palm_province(PROVINCE_NATIONAL)
+        default_national_applied_ref.current = True
+
+    solara.use_effect(
+        _default_national_first_time_only,
+        [active_product, selected_date_palm_province],
+    )
+    
+    def _default_national_on_product_change():
+        if active_product == PRODUCT_DATEPALM_FIELDS and selected_date_palm_province is None:
+            set_selected_date_palm_province(PROVINCE_NATIONAL)
+
+    solara.use_effect(_default_national_on_product_change, [active_product])
 
     # We derive bounds on demand from the map; no persistent state required
 
@@ -1219,9 +1247,15 @@ def Page():
                 pass
             national_figure_control_ref.current = None
 
+        national_tiles_ready = (
+            selected_date_palm_province == PROVINCE_NATIONAL
+            and bool(province_names)
+            and any(layer in m.layers for layer in date_palm_tile_layers.values())
+        )
+
         should_show = (
             active_product == PRODUCT_DATEPALM_FIELDS
-            and selected_date_palm_province == PROVINCE_NATIONAL
+            and national_tiles_ready
             and not national_figure_closed
         )
         if not should_show:
@@ -1447,13 +1481,17 @@ def Page():
 
             if product == PRODUCT_CENTER_PIVOT:
                 bounds = _roi_to_bounds(getattr(CFG, "center_pivot_default_roi", None))
-                if bounds:
-                    _fit_bounds(bounds)
+                center = _center_from_bounds(bounds)
+                if center:
+                    m.center = center
+                m.zoom = 6   # 👈 fixed zoom
                 return
 
             if product == PRODUCT_TREE_VEGE:
-                if tile_bounds:
-                    _fit_bounds(tile_bounds)
+                center = _center_from_bounds(tile_bounds)
+                if center:
+                    m.center = center
+                m.zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_TREE_VEGE, 9)
                 return
 
         except Exception as exc:
@@ -1824,7 +1862,7 @@ def Page():
                         "gap": "0.5rem",
                         "width": "100%",
                         "marginTop": "0.4rem",
-                        "borderTop": "1px solid #e2e8f0",   # 👈 visual separation
+                        #"borderTop": "1px solid #e2e8f0",   # 👈 visual separation
                         "paddingTop": "0.4rem",
                     },
                     children=[
@@ -1951,21 +1989,36 @@ def Page():
                 ],
             )
         if product == PRODUCT_CENTER_PIVOT:
-            return solara.Row(
-                gap="0.75rem",
-                style=base_style,
+            return solara.Column(
+                gap="0.55rem",
+                style={"width": "100%"},
                 children=[
                     solara.Div(
-                        style={"width": "220px"},
+                        style={"width": "100%"},
                         children=[
-                            solara.Markdown("Year",style={"fontSize": "var(--font-section-title)", "fontWeight": "700"},),
+                            solara.Markdown(
+                                "Year",
+                                style={
+                                    "fontSize": "var(--font-section-title)",
+                                    "fontWeight": "700",
+                                    "margin": "0 0 0.25rem 0",
+                                },
+                            ),
                             _render_cp_year_buttons(),
                         ],
                     ),
                     solara.Div(
-                        style={"width": "220px"},
+                        style={"width": "260px"},
                         children=[
-                            _slider_float("Opacity", cp_opacity, set_cp_opacity, 0.1, 1.0, 0.05, width="220px"),
+                            _slider_float(
+                                "Opacity",
+                                cp_opacity,
+                                set_cp_opacity,
+                                0.1,
+                                1.0,
+                                0.05,
+                                width="260px",
+                            ),
                         ],
                     ),
                 ],
@@ -2004,7 +2057,7 @@ def Page():
         set_zmax(_zmax)
         set_tile_bounds(bounds)
 
-        _maybe_fit_product(PRODUCT_TREE_VEGE, bounds)
+        #_maybe_fit_product(PRODUCT_TREE_VEGE, bounds)
         if _zmin is not None and m.zoom < _zmin:
             m.zoom = _zmin
 
@@ -2044,7 +2097,7 @@ def Page():
             return
         if active_product == PRODUCT_TREE_VEGE:
             upsert_overlay_by_name(m, raster_layer, below_markers=True)
-            _maybe_fit_product(PRODUCT_TREE_VEGE, tile_bounds)
+            #_maybe_fit_product(PRODUCT_TREE_VEGE, tile_bounds)
             _finish_loading(PRODUCT_TREE_VEGE)
         elif raster_layer in m.layers:
             try:
@@ -2140,17 +2193,18 @@ def Page():
         if not should_show:
             _cleanup_date_palm_tile_layers()
             return
-        provinces = (
-            list(province_names)
-            if selected_date_palm_province == PROVINCE_NATIONAL
-            else [selected_date_palm_province]
-        )
-        if not provinces:
-            _cleanup_date_palm_tile_layers()
-            return
+
+        if selected_date_palm_province == PROVINCE_NATIONAL:
+            provinces = list(province_names)
+            if not provinces:
+                _cleanup_date_palm_tile_layers()
+                set_selected_date_palm_province(None)
+                return
+        else:
+            provinces = [selected_date_palm_province]
 
         anchor: ipyleaflet.Layer | None = cp_layer if (cp_layer and cp_layer in m.layers) else raster_layer
-        active_set = {selected_date_palm_province} if selected_date_palm_province != PROVINCE_NATIONAL else set(province_names)
+        active_set = set(provinces)
 
         for province in list(date_palm_tile_layers.keys()):
             if province not in active_set:
@@ -2163,8 +2217,7 @@ def Page():
             "fillOpacity": float(getattr(CFG, "datepalms_province_fill_opacity", 0.4)),
         }
 
-        provinces_to_render = province_names if selected_date_palm_province == PROVINCE_NATIONAL else [selected_date_palm_province]
-        for province in provinces_to_render:
+        for province in provinces:
             layer = date_palm_tile_layers.get(province)
             if layer is None:
                 layer = _build_tile_layer(province, style_config)
@@ -2172,8 +2225,7 @@ def Page():
             if layer not in m.layers:
                 _insert_after(layer, anchor)
 
-        if selected_date_palm_province == PROVINCE_NATIONAL or current_zoom <= HIGHRES_ZOOM_THRESHOLD:
-            _finish_loading(PRODUCT_DATEPALM_FIELDS)
+        _finish_loading(PRODUCT_DATEPALM_FIELDS)
 
     solara.use_effect(
         _ensure_date_palm_tile_layer,
@@ -2721,7 +2773,7 @@ def Page():
         if cp_layer not in m.layers:
             _insert_after(cp_layer, raster_layer)
         roi_bounds = _roi_to_bounds(getattr(CFG, "center_pivot_default_roi", None))
-        _maybe_fit_product(PRODUCT_CENTER_PIVOT, roi_bounds)
+        #_maybe_fit_product(PRODUCT_CENTER_PIVOT, roi_bounds)
         _finish_loading(PRODUCT_CENTER_PIVOT)
 
     solara.use_effect(
