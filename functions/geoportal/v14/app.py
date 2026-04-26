@@ -191,18 +191,34 @@ PRODUCT_ORDER = [
 ]
 
 PRODUCT_LABELS = {
-    PRODUCT_TREE_VEGE: "Tree–Vege–NonVege Classification",
-    PRODUCT_DATEPALM: "Date Palm Fields Qassim Manual",
+    PRODUCT_TREE_VEGE: "Tree / Vege / Non-Vege CLASSIFICATION",
+    PRODUCT_DATEPALM: "Qassim Manual Date Palm Fields",
     PRODUCT_DATEPALM_FIELDS: "Date Palm Fields",
-    PRODUCT_FIELD_DENSITY: "Field density",
+    PRODUCT_FIELD_DENSITY: "Field Density",
     PRODUCT_TREE_HEALTH: "Tree Health",
     PRODUCT_SENSORS: "Sensors in AlDka",
     PRODUCT_CENTER_PIVOT: "Center-Pivot Fields",
+}
+PRODUCT_SHORT_LABELS = {
+    PRODUCT_TREE_VEGE: "Tree / Vege / Non-Vege",
+    PRODUCT_DATEPALM: "Qassim Manual Fields",
+    PRODUCT_DATEPALM_FIELDS: "Date Palm Fields",
+    PRODUCT_FIELD_DENSITY: "Field Density",
+    PRODUCT_TREE_HEALTH: "Tree Health",
+    PRODUCT_SENSORS: "Sensors",
+    PRODUCT_CENTER_PIVOT: "Center-Pivot",
 }
 
 PROVINCE_NATIONAL = "__national__"
 PROVINCE_LABELS = {
     PROVINCE_NATIONAL: "NATIONAL",
+    "AL_BAHA": "Al Baha",
+    "AL_JAWF": "Al Jawf",
+    "AL_MADINAH": "Al Madinah",
+    "AL_QUASSIM": "Al Quassim",
+
+    "EASTERN_PROVINCE": "Eastern Province",
+    "NORTHERN_BORDERS": "Northern Borders",
 }
 
 PRODUCT_DEFAULT_ZOOM = {
@@ -328,7 +344,7 @@ def _legend_inline_row():
         row_children.append(
             solara.Markdown(
                 f"**{title}:**",
-                style={"marginRight": "8px", "whiteSpace": "nowrap", "fontSize": "0.95rem"},
+                style={"marginRight": "8px", "whiteSpace": "nowrap", "fontSize": "var(--font-body)"},
             )
         )
 
@@ -345,7 +361,7 @@ def _legend_inline_row():
         )
         label = solara.Markdown(
             f"{it['name']}",
-            style={"margin": "0", "fontSize": "0.9rem", "whiteSpace": "nowrap", "marginRight": "10px"},
+            style={"margin": "0", "fontSize": "var(--font-body)", "whiteSpace": "nowrap", "marginRight": "10px"},
         )
         row_children.extend([color_box, label])
 
@@ -378,12 +394,12 @@ def _tree_health_badges():
             badge(healthy_color),
             solara.Markdown(
                 f"Healthy{f' ({healthy_count})' if healthy_count is not None else ''}",
-                style={"margin": "0", "fontSize": "0.9rem"},
+                style={"margin": "0", "fontSize": "var(--font-body)"},
             ),
             badge(infested_color),
             solara.Markdown(
                 f"Infested{f' ({infested_count})' if infested_count is not None else ''}",
-                style={"margin": "0", "fontSize": "0.9rem"},
+                style={"margin": "0", "fontSize": "var(--font-body)"},
             ),
         ],
         gap="0.35rem",
@@ -413,21 +429,21 @@ def _tree_health_legend_widget():
         min-width: 190px;
         display: inline-block;
     ">
-        <div style="font-size:16px;font-weight:700;color:#0f172a;line-height:1.35;">
+        <div style="font-size:var(--font-section-title);font-weight:700;color:#0f172a;line-height:1.35;">
             Tree Health
         </div>
 
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
             <span style="width:16px;height:16px;border-radius:999px;border:1px solid rgba(15,23,42,0.18);background:{healthy_color};display:inline-block;"></span>
-            <span style="font-size:14px;color:#0f172a;">{healthy_label}</span>
+            <span style="font-size:var(--font-body);color:#0f172a;">{healthy_label}</span>
         </div>
 
         <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
             <span style="width:16px;height:16px;border-radius:999px;border:1px solid rgba(15,23,42,0.18);background:{infested_color};display:inline-block;"></span>
-            <span style="font-size:14px;color:#0f172a;">{infested_label}</span>
+            <span style="fontSize: var(--font-body);color:#0f172a;">{infested_label}</span>
         </div>
 
-        {f'<div style="font-size:14px;font-weight:600;color:#0f172a;margin-top:10px;">Total number of trees: {total_count}</div>' if total_count is not None else ''}
+        {f'<div style="fontSize: var(--font-body);font-weight:600;color:#0f172a;margin-top:10px;">Total number of trees: {total_count}</div>' if total_count is not None else ''}
     </div>
     """
 
@@ -448,7 +464,7 @@ def _field_density_legend_widget() -> W.HTML:
             (
                 "<div style='display:flex;align-items:center;gap:8px;margin-top:6px;'>"
                 f"<span style='width:16px;height:16px;border-radius:4px;border:1px solid rgba(15,23,42,0.18);background:{color};display:inline-block;'></span>"
-                f"<span style='font-size:12px;color:#0f172a;'>{label}</span>"
+                f"<span style='fontSize: var(--font-small);color:#0f172a;'>{label}</span>"
                 "</div>"
             )
         )
@@ -457,7 +473,7 @@ def _field_density_legend_widget() -> W.HTML:
         #"<div style='padding-top:180px;background:transparent;'>"
         "<div style='margin-top:1px;background:rgba(255,255,255,0.4);backdrop-filter: blur(6px);border:1px solid rgba(148,163,184,0.4);"
         "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
-        f"<div style='font-size:14px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
+        f"<div style='fontSize: var(--font-section-title);font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
         #"<div style='font-size:11px;color:#475569;margin-top:4px;'>0 values remain transparent.</div>"
         f"{''.join(rows)}</div>"
         "</div>"
@@ -481,7 +497,7 @@ def _raster_legend_widget() -> W.HTML:
             (
                 "<div style='display:flex;align-items:center;gap:8px;margin-top:6px;'>"
                 f"<span style='width:16px;height:16px;border-radius:4px;border:1px solid rgba(15,23,42,0.18);background:{color};display:inline-block;'></span>"
-                f"<span style='font-size:14px;font-weight:600,color:#0f172a;'>{label}</span>"
+                f"<span style='fontSize: var(--font-body);font-weight:600,color:#0f172a;'>{label}</span>"
                 "</div>"
             )
         )
@@ -489,7 +505,7 @@ def _raster_legend_widget() -> W.HTML:
     html = (
         "<div style='margin-top:1px;background:rgba(255,255,255,0.40);backdrop-filter: blur(6px);border:1px solid rgba(148,163,184,0.40);"
         "border-radius:1px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:190px;display:inline-block;'>"
-        f"<div style='font-size:13px;font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
+        f"<div style='fontSize: var(--font-section-title);font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
         f"{''.join(rows)}</div>"
     )
     panel = W.Box(
@@ -508,12 +524,12 @@ def _product_legend(product: str):
     if product == PRODUCT_DATEPALM:
         return solara.Markdown(
             "Date Palm Fields Qassim Manual — filled polygons representing Qassim farms, clipped to the current ROI.",
-            style={"fontSize": "0.9rem", "color": "#444", "marginTop": "0.5rem"},
+            style={"fontSize": "var(--font-body)", "color": "#444", "marginTop": "0.5rem"},
         )
     if product == PRODUCT_CENTER_PIVOT:
         return solara.Markdown(
             "Center-Pivot Fields — yearly polygons rendered from the CPF archive.",
-            style={"fontSize": "0.9rem", "color": "#444", "marginTop": "0.5rem"},
+            style={"fontSize": "var(--font-body)", "color": "#444", "marginTop": "0.5rem"},
         )
     if product == PRODUCT_SENSORS:
         icon_color = getattr(CFG, "icon_color_default", "blue")
@@ -530,7 +546,7 @@ def _product_legend(product: str):
                 ),
                 solara.Markdown(
                     "Sensors in AlDka — sensor icon colors follow the configured mapping.",
-                    style={"margin": "0", "fontSize": "0.9rem"},
+                    style={"margin": "0", "fontSize": "var(--font-body)"},
                 ),
             ],
             gap="0.35rem",
@@ -605,7 +621,7 @@ def _LoginGate(on_success, session_id: str):
         ):
             solara.Markdown(
                 "Enter your username and password to access the geoportal.",
-                style={"fontSize": "0.95rem", "color": "#475569", "marginBottom": "0.75rem"},
+                style={"fontSize": "var(--font-body)", "color": "#475569", "marginBottom": "0.75rem"},
             )
             solara.InputText(
                 "Username",
@@ -630,7 +646,7 @@ def _LoginGate(on_success, session_id: str):
             if error_message:
                 solara.Markdown(
                     error_message,
-                    style={"fontSize": "0.9rem", "color": "#b91c1c", "marginTop": "0.5rem"},
+                    style={"fontSize": "var(--font-body)", "color": "#b91c1c", "marginTop": "0.5rem"},
                 )
             solara.Button(
                 label="Sign In",
@@ -771,7 +787,7 @@ def Page():
                 "border": "1px solid rgba(148,163,184,0.65)",
                 "boxShadow": "0 8px 20px rgba(15,23,42,0.16)",
                 "fontWeight": "700",
-                "fontSize": "1.5rem",
+                "fontSize": "var(--font-popup)",
                 "color": "#0f172a",
                 "textAlign": "center",
                 "minWidth": "270px",
@@ -1230,7 +1246,7 @@ def Page():
         close_button.on_click(_close)
 
         title = W.HTML(
-            value="<div style='font-size:12px;font-weight:700;color:#0f172a;'>Field acreage by province</div>"
+            value="<div style='font-size:var(--font-small);font-weight:700;color:#0f172a;'>Field acreage by province</div>"
         )
         header = W.HBox(
             [title, close_button],
@@ -1387,7 +1403,61 @@ def Page():
                     m.zoom = max_zoom
             except Exception:
                 pass
+    def _precenter_product(product: str):
+        """
+        Move the map immediately when a product is selected,
+        before the new layer finishes loading.
+        """
+        try:
+            if product == PRODUCT_TREE_HEALTH:
+                center = getattr(CFG, "tree_health_default_center", None)
+                zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_TREE_HEALTH, 16)
+                if center:
+                    m.center = center
+                if zoom:
+                    m.zoom = zoom
+                return
 
+            if product == PRODUCT_SENSORS:
+                center = getattr(CFG, "sensors_default_center", None)
+                zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_SENSORS, 16)
+                if center:
+                    m.center = center
+                if zoom:
+                    m.zoom = zoom
+                return
+
+            if product == PRODUCT_DATEPALM_FIELDS:
+                center = getattr(CFG, "datepalms_fields_default_center", None)
+                zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_DATEPALM_FIELDS, 6)
+                if center:
+                    m.center = center
+                if zoom:
+                    m.zoom = zoom
+                return
+
+            if product == PRODUCT_FIELD_DENSITY:
+                center = getattr(CFG, "field_density_default_center", None)
+                zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_FIELD_DENSITY, 6)
+                if center:
+                    m.center = center
+                if zoom:
+                    m.zoom = zoom
+                return
+
+            if product == PRODUCT_CENTER_PIVOT:
+                bounds = _roi_to_bounds(getattr(CFG, "center_pivot_default_roi", None))
+                if bounds:
+                    _fit_bounds(bounds)
+                return
+
+            if product == PRODUCT_TREE_VEGE:
+                if tile_bounds:
+                    _fit_bounds(tile_bounds)
+                return
+
+        except Exception as exc:
+            print(f"[PRECENTER] failed for {product}: {exc}")
     def _request_fit(product: str):
         pending_fit_product.current = product
         refs.did_fit_ref.current = False
@@ -1569,6 +1639,7 @@ def Page():
                 "background": "#0f766e" if is_active else "#f1f5f9",
                 "color": "#fff" if is_active else "#0f172a",
                 "fontWeight": "600" if is_active else "500",
+                "fontSize": "var(--font-button)",
             }
             buttons.append(
                 solara.Button(
@@ -1610,7 +1681,7 @@ def Page():
                         "background": "#0f766e" if is_active else "#f8fafc",
                         "color": "#f8fafc" if is_active else "#0f172a",
                         "fontWeight": "600",
-                        "fontSize": "0.88rem",
+                        "fontSize": "var(--font-button)",
                         "margin": "0",
                     },
                 )
@@ -1625,34 +1696,61 @@ def Page():
         if not province_names:
             return solara.Markdown(
                 "Province GeoPackages missing. Check the datasource directory.",
-                style={"fontSize": "0.85rem", "color": "#888"},
+                style={"fontSize": "var(--font-small)", "color": "#888"},
             )
 
-        buttons = []
-        all_provinces = list(province_names) + [PROVINCE_NATIONAL]
+        special_bottom_provinces = {"EASTERN_PROVINCE", "NORTHERN_BORDERS"}
+
+        def _norm(name: str) -> str:
+            return str(name).strip().upper().replace(" ", "_").replace("-", "_")
+        
+        all_provinces = [PROVINCE_NATIONAL] + list(province_names)
+
+        national_button = None
+        normal_buttons = []
+        bottom_buttons = []
 
         for province in all_provinces:
             is_active = selected_date_palm_province == province
+            is_national = province == PROVINCE_NATIONAL
+            is_bottom = _norm(province) in special_bottom_provinces
 
             style_button = {
-                "minWidth": "190px",
+                "width": "100%",
                 "padding": "0.45rem 0.85rem",
                 "borderRadius": "999px",
-                "border": "none",
-                "background": "transparent",
-                "color": "#0284c7" if is_active else "#0f172a",
-                "fontWeight": "600" if is_active else "500",
-                "fontSize": "0.9rem",
+                "border": "2px solid #0f766e" if is_national else "1px solid #cbd5f5",
+                "background": (
+                    "#0f766e" if is_active else
+                    "#e6f4f1" if is_national else
+                    "#f8fafc"
+                ),
+                "color": "#f8fafc" if is_active else "#0f172a",
+                "fontWeight": "700" if is_national else "600",
+                "fontSize": "var(--font-section-title)" if is_national else "var(--font-button)",
+                "textAlign": "left",
+                "transition": "all 0.2s ease",
+                "boxShadow": "0 2px 6px rgba(15,118,110,0.15)" if is_national else "none",
+                "whiteSpace": "normal",
+                "lineHeight": "1.18",
+                "overflowWrap": "anywhere",
+                "wordBreak": "break-word",
             }
 
-            label = PROVINCE_LABELS.get(province, province)
+            def _pretty_name(name: str) -> str:
+                return name.replace("_", " ").title()
 
-            # Special rendering for NATIONAL
-            if province == PROVINCE_NATIONAL and is_active:
-                buttons.append(
-                    solara.Row(
-                        gap="0.35rem",
-                        style={"alignItems": "center"},
+            label = PROVINCE_LABELS.get(province, _pretty_name(province))
+
+            if is_national:
+                if is_active:
+                    btn = solara.Div(
+                        style={
+                            "display": "flex",
+                            "flexDirection": "column",
+                            "gap": "0.25rem",
+                            "width": "100%",
+                        },
                         children=[
                             solara.Button(
                                 label,
@@ -1664,37 +1762,88 @@ def Page():
                                 f"Total mapped date palm field acreage is {NATIONAL_COVERAGE_HA:,.2f} ha",
                                 style={
                                     "margin": "0",
-                                    "fontSize": "1.2rem",# no space after digit
+                                    "fontSize": "var(--font-section-title)",
                                     "fontWeight": "600",
                                     "color": "#475569",
-                                    "whiteSpace": "nowrap",
+                                    "paddingLeft": "0.5rem",
+                                    "whiteSpace": "normal",
                                 },
                             ),
                         ],
                     )
-                )
-            else:
-                buttons.append(
-                    solara.Button(
+                else:
+                    btn = solara.Button(
                         label,
                         text=True,
                         style=style_button,
                         on_click=lambda event=None, target=province: _on_date_palm_fields_province_click(target),
                     )
+                national_button = btn
+            else:
+                btn = solara.Button(
+                    label,
+                    text=True,
+                    style=style_button,
+                    on_click=lambda event=None, target=province: _on_date_palm_fields_province_click(target),
                 )
 
-        return solara.Div(
-            children=buttons,
-            style={
-                "display": "grid",
-                "gridTemplateColumns": "repeat(7, minmax(0, 1fr))",
-                "columnGap": "2rem",
-                "rowGap": "0.7rem",
-                #"maxWidth": "920px",
-                "width":"100%",
-            },
+                if is_bottom:
+                    bottom_buttons.append(btn)
+                else:
+                    normal_buttons.append(btn)
+
+        children = []
+
+        if national_button:
+            children.append(
+                solara.Div(
+                    children=[national_button],
+                    style={"width": "100%"},
+                )
+            )
+
+        children.append(
+            solara.Div(
+                children=normal_buttons,
+                style={
+                    "display": "grid",
+                    "gridTemplateColumns": "repeat(2, minmax(0, 1fr))",
+                    "columnGap": "1rem",
+                    "rowGap": "0.5rem",
+                    "width": "100%",
+                },
+            )
         )
 
+        if bottom_buttons:
+            children.append(
+                solara.Div(
+                    style={
+                        "display": "flex",
+                        "flexDirection": "column",
+                        "gap": "0.5rem",
+                        "width": "100%",
+                        "marginTop": "0.4rem",
+                        "borderTop": "1px solid #e2e8f0",   # 👈 visual separation
+                        "paddingTop": "0.4rem",
+                    },
+                    children=[
+                        solara.Div(children=[btn], style={"width": "100%"})
+                        for btn in bottom_buttons
+                    ],
+                )
+            )
+
+        return solara.Div(
+            children=children,
+            style={
+                "display": "flex",
+                "flexDirection": "column",
+                "gap": "0.5rem",
+                "width": "100%",
+            },
+        )
+        
     def _on_date_palm_fields_province_click(target: str):
         _clear_popups()
         if target == PROVINCE_NATIONAL:
@@ -1722,8 +1871,13 @@ def Page():
                 mode_details.append(
                     solara.Markdown(
                         "Province – select a province to load the fields",
-                        style={"marginBottom": "0.35rem", "fontSize": "0.95rem",'fontWeight':"800","color":"#424345"},
-                    )
+                        style={
+                            "marginBottom": "0.35rem",
+                            "fontSize": "var(--font-section-title)",
+                            "fontWeight": "800",
+                            "color": "#424345",
+                        },)
+                  
                 )
                 mode_details.append(_render_date_palm_province_buttons())
             else:
@@ -1744,7 +1898,12 @@ def Page():
                         children=[
                             solara.Markdown(
                                 "Subproduct",
-                                style={"marginBottom": "0.3rem", "fontSize": "1.0rem", "fontWeight": "800", "color": "#424345"},
+                                style={
+                                    "marginBottom": "0.3rem",
+                                    "fontSize": "var(--font-section-title)",
+                                    "fontWeight": "800",
+                                    "color": "#424345",
+                                },
                             ),
                             _render_date_palm_subproduct_buttons(),
                             *mode_details,
@@ -1799,7 +1958,7 @@ def Page():
                     solara.Div(
                         style={"width": "220px"},
                         children=[
-                            solara.Markdown("Year"),
+                            solara.Markdown("Year",style={"fontSize": "var(--font-section-title)", "fontWeight": "700"},),
                             _render_cp_year_buttons(),
                         ],
                     ),
@@ -2196,7 +2355,7 @@ def Page():
                 "border: 1px solid rgba(148,163,184,0.65);"
                 "box-shadow: 0 8px 20px rgba(15,23,42,0.16);"
                 "font-weight: 700;"
-                "font-size: 1.5rem;"
+                "font-size: var(--font-popup);"
                 "color: #0f172a;"
                 "text-align: center;"
                 "min-width: 420px;"
@@ -2765,11 +2924,21 @@ def Page():
     def _select_product(product: str):
         if product == active_product:
             return
+
         _clear_popups()
+
+        # 1. Move map immediately while the old layer is still visible.
+        _precenter_product(product)
+
+        # 2. Then show loading state.
         loading_product_ref.current = product
         set_loading_message("Data Loading ...")
+
+        # 3. Still request final fit after data loads, in case exact bounds differ.
         if product != PRODUCT_DATEPALM_FIELDS:
             _request_fit(product)
+
+        # 4. Trigger product/layer change.
         set_active_product(product)
 
     def _product_button_style(product: str):
@@ -2778,10 +2947,17 @@ def Page():
         )
         base = {
             "borderRadius": "999px",
-            "padding": "0.45rem 1.1rem",
-            "minWidth": "180px",
+            "padding": "var(--panel-button-padding-y) var(--panel-button-padding-x)",
+            "width": "100%",
+            "textAlign": "left",
+            "justifyContent": "flex-start",
             "fontWeight": "600",
-            "fontSize": "0.95rem",
+            "fontSize": "var(--font-button)",
+            "overflowWrap": "anywhere",
+            "wordBreak": "break-word",
+            "whiteSpace": "normal",
+            "lineHeight": "1.25",
+            "minHeight": "clamp(34px, 4.5vh, 52px)",
             "transition": "background 0.2s ease",
             "cursor": "pointer",
             "margin": "0",
@@ -2805,7 +2981,12 @@ def Page():
     with solara.Column(gap="0.75rem", style={"height": "100vh", "width": "100%"}):
         solara.Markdown(
             "### 🌴 Geoportal for Date Palm Field Informatics",
-            style={"fontSize": "1.5rem", "fontWeight": "700", "color": "#272828"},
+            style={
+                "fontSize": "var(--font-page-title)",
+                "fontWeight": "700",
+                "color": "#272828",
+                "lineHeight": "1.2",
+            },
         )
 
         with solara.Div(
@@ -2819,10 +3000,11 @@ def Page():
         ):
             # LEFT PANEL: files/products/settings/buttons
             with solara.Div(
+                classes=["geoportal-left-panel"],
                 style={
-                    "width": "30%",
-                    "minWidth": "260px",
-                    "maxWidth": "99%",
+                    "width": "var(--left-panel-width)",
+                    "minWidth": "240px",
+                    "maxWidth": "55vw",
                     "height": "100%",
                     "overflowY": "auto",
                     "resize": "horizontal",
@@ -2832,14 +3014,11 @@ def Page():
                 }
             ):
                 with solara.Card("", style={"padding": "1px"}):
-                    solara.Markdown(
-                        "**Products**",
-                        style={"fontSize": "1.3rem", "marginTop": "-20px", "color": "#424345"},
-                    )
-
-                    with solara.Row(
-                        gap="1rem",
-                        style={"alignItems": "center", "marginBottom": "0.75rem", "flexWrap": "wrap"},
+                    with solara.Column(
+                        gap="0.05rem",  # 👈 controls vertical gap (reduce this)
+                        style={
+                            "marginBottom": "0px",
+                        },
                     ):
                         solara.Switch(
                             label="Force GCS for server-side asset reads"
@@ -2847,25 +3026,38 @@ def Page():
                             value=force_gcs,
                             on_value=set_force_gcs_state,
                         )
+
                         solara.Markdown(
-                            f"`Mode:` {'GCS only for direct asset reads' if force_gcs else 'Local first, GCS fallback'}",
-                            style={"fontSize": "0.95rem", "color": "#475569", "margin": "0"},
+                            f"Mode: {'GCS only for direct asset reads' if force_gcs else 'Local first, GCS fallback'}  \n"
+                            f"Deploy: {'production' if IS_PRODUCTION else 'development'}",
+                            style={
+                                "fontSize": "var(--font-body)",
+                                "color": "#475569",
+                                "marginTop": "-20px",
+                                "lineHeight": "1.05",  # 👈 tighter line spacing
+                            },
                         )
+                        
                         solara.Markdown(
-                            f"`Deploy:` {'production' if IS_PRODUCTION else 'development'}",
-                            style={"fontSize": "0.95rem", "color": "#475569", "margin": "0"},
+                            "**Products**",
+                            style={
+                                "fontSize": "var(--font-panel-title)",
+                                "marginTop": "0.75rem", 
+                                "color": "#424345",
+                            },
                         )
 
-                    with solara.Row(
-                        gap="0.5rem",
-                        style={"flexWrap": "wrap", "alignItems": "stretch"},
+                    with solara.Column(
+                        gap="0.45rem",
+                        style={"width": "100%"},
                     ):
                         for product in PRODUCT_ORDER:
                             solara.Button(
-                                PRODUCT_LABELS.get(product, product),
+                                PRODUCT_SHORT_LABELS.get(product, PRODUCT_LABELS.get(product, product)),
                                 text=True,
+                                classes=["geoportal-product-button"],
                                 on_click=lambda event=None, product=product: _select_product(product),
-                                style=_product_button_style(product),
+                                style={**_product_button_style(product), "width": "100%"},
                             )
 
                     controls_widget = _product_controls(active_product) if active_product else None
@@ -2906,6 +3098,89 @@ def Page():
                 }
             ):
                 solara.Style("""
+                             
+                             
+                    :root {
+                        --left-panel-width: clamp(260px, 30vw, 520px);
+
+                        --font-page-title: clamp(1.1rem, 1.2vw + 0.6rem, 2rem);
+                        --font-popup: clamp(1rem, 1vw + 0.6rem, 1.6rem);
+
+                        --panel-button-padding-y: clamp(0.35rem, 0.35vw, 0.65rem);
+                        --panel-button-padding-x: clamp(0.65rem, 0.75vw, 1.25rem);
+                    }
+
+                    .geoportal-left-panel {
+                        width: var(--left-panel-width);
+                        min-width: 240px;
+                        max-width: 55vw;
+                        container-type: inline-size;
+                        --font-panel-title: clamp(1.05rem, 7cqw, 1.6rem);
+                        --font-section-title: clamp(0.9rem, 4.2cqw, 1.15rem);
+                        --font-body: clamp(0.78rem, 3.4cqw, 1rem);
+                        --font-button: clamp(0.78rem, 3.7cqw, 1.08rem);
+                        --font-small: clamp(0.7rem, 2.8cqw, 0.9rem);
+                    }
+                    
+
+                    .geoportal-panel-title {
+                        font-size: var(--font-panel-title) !important;
+                    }
+
+                    .geoportal-panel-text {
+                        font-size: var(--font-body) !important;
+                    }
+
+                    .geoportal-product-button {
+                        width: 100% !important;
+                        font-size: var(--font-button) !important;
+                        line-height: 1.18 !important;
+                        white-space: normal !important;
+                        overflow-wrap: anywhere !important;
+                        word-break: break-word !important;
+                        text-align: left !important;
+                    }
+
+                    /* 🔥 Force inner Solara/Vuetify button content */
+                    .geoportal-product-button *,
+                    .geoportal-product-button .v-btn__content,
+                    .geoportal-product-button button,
+                    .geoportal-product-button span {
+                        font-size: var(--font-button) !important;
+                        line-height: 1.18 !important;
+                        white-space: normal !important;
+                        overflow-wrap: anywhere !important;
+                        word-break: break-word !important;
+                    }
+
+                    /* Align text properly inside button */
+                    .geoportal-product-button .v-btn__content {
+                        width: 100% !important;
+                        justify-content: flex-start !important;
+                    }
+
+                    .geoportal-province-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(clamp(120px, 45%, 220px), 1fr));
+                        gap: clamp(0.35rem, 0.7vw, 1rem);
+                        width: 100%;
+                    }
+
+                    @media (max-width: 900px) {
+                        .geoportal-left-panel {
+                            width: 38vw;
+                            max-width: 65vw;
+                        }
+                    }
+
+                    @media (max-width: 650px) {
+                        .geoportal-left-panel {
+                            width: 100%;
+                            max-width: 100%;
+                            resize: none;
+                        }
+                    }
+                    
                     .leaflet-container {
                         width: 100% !important;
                         height: calc(100vh - 90px) !important;
