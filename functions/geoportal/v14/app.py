@@ -182,12 +182,12 @@ PRODUCT_SENSORS = "sensors"
 PRODUCT_CENTER_PIVOT = "cpf"
 
 PRODUCT_ORDER = [
+    PRODUCT_DATEPALM_FIELDS,
     PRODUCT_TREE_HEALTH,
     PRODUCT_SENSORS,
-    PRODUCT_CENTER_PIVOT,
-    PRODUCT_DATEPALM_FIELDS,
     PRODUCT_DATEPALM,
     PRODUCT_TREE_VEGE,
+    PRODUCT_CENTER_PIVOT,
 ]
 
 PRODUCT_LABELS = {
@@ -196,7 +196,7 @@ PRODUCT_LABELS = {
     PRODUCT_DATEPALM_FIELDS: "Date Palm Fields",
     PRODUCT_FIELD_DENSITY: "Field Density",
     PRODUCT_TREE_HEALTH: "Tree Health",
-    PRODUCT_SENSORS: "Sensors in AlDka",
+    PRODUCT_SENSORS: "Soil Moisture Sensors",
     PRODUCT_CENTER_PIVOT: "Center-Pivot Fields",
 }
 PRODUCT_SHORT_LABELS = {
@@ -205,8 +205,8 @@ PRODUCT_SHORT_LABELS = {
     PRODUCT_DATEPALM_FIELDS: "Date Palm Fields",
     PRODUCT_FIELD_DENSITY: "Field Density",
     PRODUCT_TREE_HEALTH: "Tree Health",
-    PRODUCT_SENSORS: "Sensors",
-    PRODUCT_CENTER_PIVOT: "Center-Pivot",
+    PRODUCT_SENSORS: "Soil Moisture Sensors",
+    PRODUCT_CENTER_PIVOT: "Center-Pivot Fields",
 }
 
 PROVINCE_NATIONAL = "__national__"
@@ -1410,12 +1410,12 @@ def Page():
         """
         try:
             if product == PRODUCT_TREE_HEALTH:
-                center = getattr(CFG, "tree_health_default_center", None)
-                zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_TREE_HEALTH, 16)
-                if center:
-                    m.center = center
-                if zoom:
-                    m.zoom = zoom
+                #center = getattr(CFG, "tree_health_default_center", None)
+                #zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_TREE_HEALTH, 16)
+                #if center:
+                #    m.center = center
+                #if zoom:
+                #    m.zoom = zoom
                 return
 
             if product == PRODUCT_SENSORS:
