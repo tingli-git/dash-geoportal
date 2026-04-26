@@ -1,61 +1,18 @@
-# functions/geoportal/v14/center_pivot_loader.py
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple
 from types import SimpleNamespace
 
 import ipyleaflet
 
 from functions.geoportal.v14.config import CFG
-from functions.geoportal.v14.cloud_assets import ensure_local_asset, force_gcs_enabled
+from functions.geoportal.v14.cloud_assets import force_gcs_enabled
 from functions.geoportal.v14.popups import show_popup
 
-BBox = Tuple[float, float, float, float]  # (south, west, north, east)
-
-
-def _year_to_filename(year: int) -> str:
-    return f"CPF_fields_{year}_simpl.geojson"
-
-
-def _feature_bbox_intersects(feature: Dict[str, Any], bbox: BBox) -> bool:
-    """Fast bbox filter for Polygon/MultiPolygon."""
-    s, w, n, e = bbox
-    geom = (feature or {}).get("geometry") or {}
-    gtype = geom.get("type")
-    coords = geom.get("coordinates")
-    if not coords:
-        return False
-
-    def _bbox_of_poly(coordlist):
-        # coordlist: [ [ [lon,lat], ... ] , ... rings ]
-        lon_min, lat_min, lon_max, lat_max = 10**9, 10**9, -10**9, -10**9
-        for ring in coordlist:
-            for lon, lat in ring:
-                lon_min = min(lon_min, lon)
-                lat_min = min(lat_min, lat)
-                lon_max = max(lon_max, lon)
-                lat_max = max(lat_max, lat)
-        # return as (south, west, north, east)
-        return (lat_min, lon_min, lat_max, lon_max)
-
-    if gtype == "Polygon":
-        fs, fw, fn, fe = _bbox_of_poly(coords)
-    elif gtype == "MultiPolygon":
-        lat_min, lon_min, lat_max, lon_max = 10**9, 10**9, -10**9, -10**9
-        for poly in coords:
-            s2, w2, n2, e2 = _bbox_of_poly(poly)
-            lat_min = min(lat_min, s2)
-            lon_min = min(lon_min, w2)
-            lat_max = max(lat_max, n2)
-            lon_max = max(lon_max, e2)
-        fs, fw, fn, fe = lat_min, lon_min, lat_max, lon_max
-    else:
-        return False
-
-    # disjoint?
-    return not (fn < s or fs > n or fe < w or fw > e)
+BBox = Tuple[float, float, float, float]  # kept for API compatibility
 
 
 def build_center_pivot_layer(
@@ -67,126 +24,52 @@ def build_center_pivot_layer(
     m: Optional[ipyleaflet.Map] = None,
     active_marker_ref: Optional[SimpleNamespace] = None,
 ):
-    """
-    Returns (layer, error_message). `layer` is the *base* CPF layer (light green).
-    A separate pink highlight layer is managed on click for responsiveness.
-
-    Notes:
-    - If use_http_url=True and clip_to_bbox is not None, clipping cannot be applied
-      by a static HTTP server. In that case, the full file is fetched by the browser.
-      To actually clip, set use_http_url=False.
-    """
+    """Return the yearly CPF vector-tile layer for the selected year."""
     if year not in getattr(CFG, "center_pivot_years", ()):
         return None, f"Year {year} not in allowed set: {getattr(CFG, 'center_pivot_years', ())}"
 
     name = getattr(CFG, "center_pivot_layer_name", "Center-Pivot Fields")
-
-    # Prepare a place on the map to hold the "current highlight" single-feature layer
-    if m is not None and not hasattr(m, "_cpf_highlight_layer"):
-        m._cpf_highlight_layer = None  # ipyleaflet.GeoJSON holding 1 selected feature
-
-    # Base style: fast static (no dynamic restyling)
     base_style = {
-        "color": "#56B4E9",   # light blue color blind
+        "fillColor": "#56B4E9",
+        "color": "#56B4E9",
         "weight": 1,
         "fillOpacity": 0.35,
     }
-    base_hover = {"weight": 2}
 
-    # ---- build the base layer (URL or clipped local) ----
-    if use_http_url and clip_to_bbox is None:
-        # Fast path: browser fetches the full file
-        http_base = getattr(
-            CFG,
-            "center_pivot_public_http_base" if force_gcs_enabled() else "center_pivot_http_base",
-            "",
-        ).rstrip("/")
-        url = f"{http_base}/{_year_to_filename(year)}"
-        layer = ipyleaflet.GeoJSON(
-            url=url,
-            name=name,
-            style=base_style,
-            hover_style=base_hover,
-        )
-    else:
-        # Local read (+ optional clip)
-        fp = ensure_local_asset(Path(CFG.center_pivot_dir) / _year_to_filename(year))
-        if not fp.exists():
-            return None, f"CPF file not found: {fp}"
-        with fp.open("r", encoding="utf-8") as f:
-            gj = json.load(f)
+    base_url = getattr(
+        CFG,
+        "center_pivot_tile_public_base_url" if force_gcs_enabled() else "center_pivot_tile_base_url",
+        "",
+    ).rstrip("/")
+    year_stem = f"CPF_fields_{year}_simpl"
+    url_template = str(getattr(CFG, "center_pivot_tile_url_template", "{base}/{year}/{z}/{x}/{y}.pbf"))
+    url = url_template.format(base=base_url, year=year_stem, z="{z}", x="{x}", y="{y}")
 
-        feats = gj.get("features", [])
-        if clip_to_bbox is not None:
-            feats = [ft for ft in feats if _feature_bbox_intersects(ft, clip_to_bbox)]
-        data = {"type": "FeatureCollection", "features": feats}
+    style_key = _vector_layer_id_from_mbtiles(year_stem) or "*"
+    layer = ipyleaflet.VectorTileLayer(
+        url=url,
+        name=name,
+        min_zoom=5,
+        max_zoom=17,
+        attribution="© local tiles",
+        renderer="svg",
+        interactive=True,
+        feature_id="id",
+        vector_tile_layer_styles={style_key: base_style},
+    )
+    try:
+        layer.style = base_style
+    except Exception:
+        pass
 
-        layer = ipyleaflet.GeoJSON(
-            data=data,
-            name=name,
-            style=base_style,
-            hover_style=base_hover,
-        )
-
-    # ---- click handler: create/update a thin pink highlight layer with only the clicked feature ----
     def _on_click(event, feature, **kwargs):
         if not m:
             return
-
-        # Clean properties for popup
         props = dict((feature or {}).get("properties") or {})
-        # remove style-ish keys from popup
         props.pop("style", None)
         props.pop("_style", None)
         props.pop("visual_style", None)
 
-        # Build a single-feature GeoJSON for highlight
-        single = {"type": "FeatureCollection", "features": [feature]}
-
-        # Remove previous highlight layer if any
-        try:
-            if m._cpf_highlight_layer and (m._cpf_highlight_layer in m.layers):
-                m.remove_layer(m._cpf_highlight_layer)
-        except Exception:
-            pass
-
-        # Create a new highlight layer (pink) just for the selected feature
-        highlight_style = {
-            "color": "#CC79A7",   # pink outline - colorblind friendly
-            "weight": 3,
-            "fillOpacity": 0.45,
-        }
-        try:
-            hl = ipyleaflet.GeoJSON(
-                data=single,
-                name="CPF Selected",
-                style=highlight_style,
-            )
-        except Exception:  # fallback if feature is not serializable as-is
-            try:
-                fcopy = json.loads(json.dumps(feature))
-                hl = ipyleaflet.GeoJSON(
-                    data={"type": "FeatureCollection", "features": [fcopy]},
-                    name="CPF Selected",
-                    style=highlight_style,
-                )
-            except Exception:
-                hl = None
-
-        m._cpf_highlight_layer = hl
-        if hl is not None:
-            # Insert above the base layer and below sensor markers (app ensures sensors float to top)
-            try:
-                # Prefer to put it right after the base layer
-                if layer in m.layers:
-                    idx = list(m.layers).index(layer)
-                    m.layers = tuple(list(m.layers[:idx + 1]) + [hl] + list(m.layers[idx + 1:]))
-                else:
-                    m.add_layer(hl)
-            except Exception:
-                m.add_layer(hl)
-
-        # Popup position — Leaflet passes click [lat, lon]
         latlon = kwargs.get("coordinates")
         if isinstance(latlon, (list, tuple)) and len(latlon) == 2:
             lat, lon = float(latlon[0]), float(latlon[1])
@@ -205,3 +88,26 @@ def build_center_pivot_layer(
         pass
 
     return layer, None
+
+
+def _vector_layer_id_from_mbtiles(year_stem: str) -> Optional[str]:
+    cache_dir = Path(getattr(CFG, "center_pivot_tiles_dir", "")).parent / "cpf_mbfiles"
+    if not cache_dir or not cache_dir.is_dir():
+        return None
+    mbtiles = cache_dir / f"{year_stem}.mbtiles"
+    if not mbtiles.exists():
+        return None
+    try:
+        conn = sqlite3.connect(mbtiles)
+        cur = conn.execute("SELECT value FROM metadata WHERE name='json'")
+        row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        payload = json.loads(row[0])
+        vector_layers = payload.get("vector_layers", [])
+        if not vector_layers:
+            return None
+        return vector_layers[0].get("id")
+    except Exception:
+        return None

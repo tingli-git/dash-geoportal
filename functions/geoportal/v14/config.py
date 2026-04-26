@@ -128,13 +128,23 @@ class Config:
         )
     )
 
-    # --- Center-Pivot (CPF) GeoJSONs ---
+    # --- Center-Pivot (CPF) datasets ---
     center_pivot_dir: Path = APP_SERVER_ROOT / "center_pivot"
     center_pivot_http_base: str = os.environ.get("CENTER_PIVOT_HTTP_BASE", f"{ASSET_BASE_URL}/center_pivot")
     center_pivot_public_http_base: str = os.environ.get("CENTER_PIVOT_PUBLIC_HTTP_BASE", f"{PUBLIC_ASSET_BASE_URL}/center_pivot")
+    center_pivot_tiles_dir: Path = APP_SERVER_ROOT / "cpf_tiles"
+    center_pivot_tile_base_url: str = os.environ.get(
+        "CENTER_PIVOT_TILE_BASE_URL",
+        f"{ASSET_BASE_URL}/cpf_tiles",
+    )
+    center_pivot_tile_public_base_url: str = os.environ.get(
+        "CENTER_PIVOT_TILE_PUBLIC_BASE_URL",
+        f"{PUBLIC_ASSET_BASE_URL}/cpf_tiles",
+    )
+    center_pivot_tile_url_template: str = "{base}/{year}/{z}/{x}/{y}.pbf"
     center_pivot_layer_name: str = "Center-Pivot Fields"
-    center_pivot_years: tuple[int, ...] = (1995,2000,2005,2010,2015,2016,2017,2018,2019,2020,2021,2022,2023)
-    center_pivot_default_year: int = 2023
+    center_pivot_years: tuple[int, ...] = (1990,1995,2000,2005,2010,2015,2016,2017,2018,2019,2020,2021,2022,2023,2024)
+    center_pivot_default_year: int = 2024
 
     # Optional default ROI clipping (lat_min, lon_min, lat_max, lon_max)
     center_pivot_default_roi: tuple[float, float, float, float] = (24.0, 40.0, 28.0, 45.0)
