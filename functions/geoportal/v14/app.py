@@ -1112,6 +1112,7 @@ def Page():
             offset=(0, -1),
         )
         m.add_layer(popup)
+        _bring_layer_to_front(popup)
         field_popup_ref.current = popup
 
     solara.use_effect(_show_field_popup, [field_info])
@@ -1385,7 +1386,14 @@ def Page():
 
         if active_layer and active_layer not in m.layers:
             _insert_after(active_layer, esri)
-
+    def _bring_layer_to_front(layer):
+        if not layer or layer not in m.layers:
+            return
+        try:
+            m.remove_layer(layer)
+            m.add_layer(layer)
+        except Exception:
+            pass
     solara.use_effect(_sync_ksa_layer, [m, esri, active_product, ksa_layer_normal, ksa_layer_area])
 
 
@@ -2339,6 +2347,8 @@ def Page():
         layer.on_click(_on_click)
         if layer not in m.layers:
             m.add_layer(layer)
+            _bring_layer_to_front(layer)
+                
         set_highres_layer(layer)
         highres_request_ref.current = request_key
         _finish_loading(PRODUCT_DATEPALM_FIELDS)
@@ -2605,8 +2615,9 @@ def Page():
             if tile_layer in m.layers:
                 anchor = tile_layer
                 break
-        _insert_after(layer, anchor)
-
+        m.add_layer(layer)
+        _bring_layer_to_front(layer)
+    
     solara.use_effect(
         _render_hover_highlight,
         [hover_field_record, active_product, cp_layer, raster_layer],

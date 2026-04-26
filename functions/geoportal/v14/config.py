@@ -142,9 +142,9 @@ class Config:
     # --- Tree health points ---
     tree_health_geojson_file: Path = APP_SERVER_ROOT / "TreeHealth" / "tree_health.geojson"
     tree_health_layer_name: str = "Tree Health"
-    tree_health_point_radius: float = 6.0
+    tree_health_point_radius: float = 4.0
     tree_health_fill_opacity: float = 0.75
-    tree_health_stroke_weight: float = 1.5
+    tree_health_stroke_weight: float = 1.0
     tree_health_color_healthy: str = "#66C2A5"
     tree_health_color_infested: str = "#D1495B"
     tree_health_color_default: str = "#8C8C8C"

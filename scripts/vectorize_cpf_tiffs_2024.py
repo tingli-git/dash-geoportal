@@ -73,16 +73,22 @@ def _select_files(source_dir: Path, pattern: str, year: str) -> list[Path]:
 
 def _polygonize_tiff(path: Path) -> gpd.GeoDataFrame:
     with rasterio.open(path) as src:
-        band = src.read(1)
+        if src.count < 2:
+            raise ValueError(f"{path.name} has only {src.count} band(s); band 2 is required")
+
+        # Use only band 2 for polygonization, but invalidate pixels where any band is -999.
+        band = src.read(2)
+        all_bands = src.read()
         nodata = src.nodata
 
         valid_mask = band != 0
+        valid_mask &= ~(all_bands == -999).any(axis=0)
         if nodata is not None:
             valid_mask &= band != nodata
 
         features = []
         for geom, value in shapes(band, mask=valid_mask, transform=src.transform):
-            if value == 0:
+            if value in {0, -999}:
                 continue
             features.append(
                 {

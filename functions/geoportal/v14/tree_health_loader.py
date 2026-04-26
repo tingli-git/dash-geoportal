@@ -73,11 +73,11 @@ def _collect_markers(
 ) -> Tuple[List[ipyleaflet.CircleMarker], List[Tuple[float, float]]]:
     layers: List[ipyleaflet.CircleMarker] = []
     locations: List[Tuple[float, float]] = []
-    radius_val = getattr(CFG, "tree_health_point_radius", 6.0)
+    radius_val = getattr(CFG, "tree_health_point_radius", 3.0)
     try:
         radius = int(round(float(radius_val)))
     except Exception:
-        radius = 6
+        radius = 3
     default_fill = float(getattr(CFG, "tree_health_fill_opacity", 0.75))
     fill_opacity = float(fill_opacity_override) if (fill_opacity_override is not None) else default_fill
     marker_opacity = float(marker_opacity) if (marker_opacity is not None) else fill_opacity
