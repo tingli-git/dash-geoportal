@@ -2801,195 +2801,198 @@ def Page():
         return base
 
     # Main vertical layout for the geoportal page: header, controls, map, and notifications.
-    with solara.Column(gap="0.75rem"):
-        # Page title shown above the product controls.
-        solara.Markdown("### 🌴 Geoportal for Date Palm Field Informatics",
-                        style={"fontSize":"1.5rem","fontWeight":"700","color": "#272828",})
-        # Card groups the product picker and the widgets that depend on the active product.
-        with solara.Card("", style={"padding": "1px"}):
-            solara.Markdown("**Products**", style={"fontSize": "1.3rem","marginTop": "-20px","color":"#424345"})
-            with solara.Row(
-                gap="1rem",
-                style={"alignItems": "center", "marginBottom": "0.75rem", "flexWrap": "wrap"},
-            ):
-                solara.Switch(
-                    label="Force GCS for server-side asset reads" + (" (tiles stay external in production)" if IS_PRODUCTION else ""),
-                    value=force_gcs,
-                    on_value=set_force_gcs_state,
-                )
-                solara.Markdown(
-                    f"`Mode:` {'GCS only for direct asset reads' if force_gcs else 'Local first, GCS fallback'}",
-                    style={"fontSize": "0.95rem", "color": "#475569", "margin": "0"},
-                )
-                solara.Markdown(
-                    f"`Deploy:` {'production' if IS_PRODUCTION else 'development'}",
-                    style={"fontSize": "0.95rem", "color": "#475569", "margin": "0"},
-                )
-            
-            # Product buttons let the user switch between map layers / analytics products.
-            with solara.Row(
-                gap="0.5rem",
-                style={
-                    "flexWrap": "wrap",
-                    "alignItems": "stretch",
-                },
-            ):
-                for product in PRODUCT_ORDER:
-                    solara.Button(
-                        PRODUCT_LABELS.get(product, product),
-                        text=True,
-                        # Capture the current loop value so each button activates its own product.
-                        on_click=lambda event=None, product=product: _select_product(product),
-                        # Apply active/inactive styling so the selected product is visually obvious.
-                        style=_product_button_style(product),
-                    )
-            # Build the product-specific controls only when a product is selected.
-            controls_widget = _product_controls(active_product) if active_product else None
-            legend_items = []
-            if active_product:
-                # Request the matching legend fragment for the current product, if one exists.
-                legend_extra = _product_legend(active_product)
-                if legend_extra:
-                    legend_items.append(legend_extra)
-            # Wrap legend content in a column so multiple legend blocks can stack cleanly.
-            legend_widget = solara.Column(children=legend_items) if legend_items else None
-            
-            # Show controls and legend side-by-side when either one is available.
-            if legend_widget or controls_widget:
-                has_legend = legend_widget is not None
+    # Main split layout: left controls, draggable divider, right map.
+    with solara.Column(gap="0.75rem", style={"height": "100vh", "width": "100%"}):
+        solara.Markdown(
+            "### 🌴 Geoportal for Date Palm Field Informatics",
+            style={"fontSize": "1.5rem", "fontWeight": "700", "color": "#272828"},
+        )
 
-                with solara.Row(
-                    gap="1rem",
-                    style={
-                        "alignItems": "flex-start",
-                        "flexWrap": "nowrap",
-                        "marginTop": "0.75rem",
-                    },
-                ):
-                    if controls_widget:
-                        solara.Div(
-                            style={
-                                "flex": "0 0 70%" if has_legend else "1 1 100%",
-                                "maxWidth": "70%" if has_legend else "100%",
-                                "width": "100%" if not has_legend else None,
-                            },
-                            children=[controls_widget],
-                        )
-                    if legend_widget:
-                        solara.Div(
-                            style={"flex": "0 0 30%", "maxWidth": "30%"},
-                            children=[legend_widget],
-                        )
-            
-            # Render the product summary below the controls card when provided by the active product.
-            summary_widget = _product_summary(active_product)
-            if summary_widget:
-                summary_widget
-
-        # Map wrapper keeps the leaflet map full width and provides a hook for overlay styling.
         with solara.Div(
             style={
-                "position": "relative",
+                "display": "flex",
+                "flexDirection": "row",
                 "width": "100%",
+                "height": "calc(100vh - 70px)",
+                "overflow": "hidden",
             }
         ):
-            # Inject CSS overrides to make the Leaflet control panels semi-transparent and polished.
-            solara.Style("""
-                         
-                .leaflet-control .tree-health-attr-badge,
-                .leaflet-control .widget-box.tree-health-attr-badge,
-                .leaflet-control .jupyter-widgets.tree-health-attr-badge,
-                .leaflet-control .datepalm-field-attr-badge,
-                .leaflet-control .widget-box.datepalm-field-attr-badge,
-                .leaflet-control .jupyter-widgets.datepalm-field-attr-badge {
-                    background: rgba(255,255,255,0.20) !important;
-                    backdrop-filter: blur(6px) !important;
-                    -webkit-backdrop-filter: blur(6px) !important;
-                    border: 1px solid rgba(148,163,184,0.25) !important;
-                    border-radius: 12px !important;
-                    box-shadow: 0 8px 24px rgba(15,23,42,0.10) !important;
+            # LEFT PANEL: files/products/settings/buttons
+            with solara.Div(
+                style={
+                    "width": "30%",
+                    "minWidth": "260px",
+                    "maxWidth": "99%",
+                    "height": "100%",
+                    "overflowY": "auto",
+                    "resize": "horizontal",
+                    "paddingRight": "0.75rem",
+                    "boxSizing": "border-box",
+                    "borderRight": "2px solid #cbd5e1",
                 }
-                .leaflet-control .sensor-attr-badge,
-                .leaflet-control .widget-box.sensor-attr-badge,
-                .leaflet-control .jupyter-widgets.sensor-attr-badge {
-                    background: rgba(255,255,255,0.20) !important;
-                    backdrop-filter: blur(4px) !important;
-                    -webkit-backdrop-filter: blur(4px) !important;
-                    border: 1px solid rgba(148,163,184,0.25) !important;
-                    border-radius: 12px !important;
-                    box-shadow: 0 8px 24px rgba(15,23,42,0.10) !important;
-                }
-               
-                         
-                .leaflet-top.leaflet-right {
-                    display: flex;
-                    flex-direction: column;
-                    align-items: flex-end;
-                }
+            ):
+                with solara.Card("", style={"padding": "1px"}):
+                    solara.Markdown(
+                        "**Products**",
+                        style={"fontSize": "1.3rem", "marginTop": "-20px", "color": "#424345"},
+                    )
 
-                .leaflet-top.leaflet-right .leaflet-control-layers {
-                    order: 1;
-                    margin-bottom: 8px;
-                }
+                    with solara.Row(
+                        gap="1rem",
+                        style={"alignItems": "center", "marginBottom": "0.75rem", "flexWrap": "wrap"},
+                    ):
+                        solara.Switch(
+                            label="Force GCS for server-side asset reads"
+                            + (" (tiles stay external in production)" if IS_PRODUCTION else ""),
+                            value=force_gcs,
+                            on_value=set_force_gcs_state,
+                        )
+                        solara.Markdown(
+                            f"`Mode:` {'GCS only for direct asset reads' if force_gcs else 'Local first, GCS fallback'}",
+                            style={"fontSize": "0.95rem", "color": "#475569", "margin": "0"},
+                        )
+                        solara.Markdown(
+                            f"`Deploy:` {'production' if IS_PRODUCTION else 'development'}",
+                            style={"fontSize": "0.95rem", "color": "#475569", "margin": "0"},
+                        )
 
-                .leaflet-top.leaflet-right .leaflet-control:has(.raster-legend-panel),
-                .leaflet-top.leaflet-right .leaflet-control:has(.field-density-legend-panel),
-                .leaflet-top.leaflet-right .leaflet-control:has(.tree-health-legend-panel) {
-                    order: 2;
-                }
+                    with solara.Row(
+                        gap="0.5rem",
+                        style={"flexWrap": "wrap", "alignItems": "stretch"},
+                    ):
+                        for product in PRODUCT_ORDER:
+                            solara.Button(
+                                PRODUCT_LABELS.get(product, product),
+                                text=True,
+                                on_click=lambda event=None, product=product: _select_product(product),
+                                style=_product_button_style(product),
+                            )
 
-                .leaflet-control .national-figure-panel {
-                    background: rgba(255,255,255,0.20) !important;
-                    backdrop-filter: blur(6px);
-                    border-radius: 10px;
-                    box-shadow: 0 8px 24px rgba(15,23,42,0.12);
-                }
+                    controls_widget = _product_controls(active_product) if active_product else None
 
-                .leaflet-control .widget-box.national-figure-panel {
-                    background: rgba(255,255,255,0.20) !important;
-                }
+                    legend_items = []
+                    if active_product:
+                        legend_extra = _product_legend(active_product)
+                        if legend_extra:
+                            legend_items.append(legend_extra)
 
-                .leaflet-control .jupyter-widgets.national-figure-panel {
-                    background: rgba(255,255,255,0.20) !important;
-                }
-                .leaflet-popup.tree-health-top-center-popup {
-                    margin-left: -210px !important;   /* half of ~420px width */
-                    margin-top: 0 !important;
-                }
+                    legend_widget = solara.Column(children=legend_items) if legend_items else None
 
-                .leaflet-popup.tree-health-top-center-popup .leaflet-popup-tip-container {
-                    display: none !important;
-                }
+                    if controls_widget:
+                        solara.Div(
+                            style={"width": "100%", "marginTop": "0.75rem"},
+                            children=[controls_widget],
+                        )
 
-                .leaflet-popup.tree-health-top-center-popup .leaflet-popup-content-wrapper {
-                    background: transparent !important;
-                    box-shadow: none !important;
-                    border: none !important;
-                    padding: 0 !important;
-                }
+                    if legend_widget:
+                        solara.Div(
+                            style={"width": "100%", "marginTop": "0.75rem"},
+                            children=[legend_widget],
+                        )
 
-                .leaflet-popup.tree-health-top-center-popup .leaflet-popup-content {
-                    margin: 0 !important;
+                    summary_widget = _product_summary(active_product)
+                    if summary_widget:
+                        summary_widget
+
+            # RIGHT PANEL: map
+            with solara.Div(
+                style={
+                    "flex": "1 1 auto",
+                    "height": "100%",
+                    "position": "relative",
+                    "overflow": "hidden",
+                    "paddingLeft": "0.75rem",
+                    "boxSizing": "border-box",
                 }
-                            
-            """)
-            # Display the prebuilt interactive Leaflet/Folium map object.
-            solara.display(m)
-            # Overlay a loading indicator while product or map state is updating.
-            _loading_badge()
-        ## turn off if not showing the time sereis at the map window bottom
-        #if ts_df is not None:
-        #    with solara.Column(style={"width": "100%"}):
-        #        solara.Markdown(f"**{ts_title}**")
-        #        TimeSeriesFigure(ts_df, title=ts_title)
-#
-        #Toast(message=toast_state["message"], kind=toast_state["kind"], visible=toast_state["visible"], on_close=hide_toast)
-        # Global toast notification for user feedback such as success, warning, or error messages.
+            ):
+                solara.Style("""
+                    .leaflet-container {
+                        width: 100% !important;
+                        height: calc(100vh - 90px) !important;
+                    }
+
+                    .leaflet-control .tree-health-attr-badge,
+                    .leaflet-control .widget-box.tree-health-attr-badge,
+                    .leaflet-control .jupyter-widgets.tree-health-attr-badge,
+                    .leaflet-control .datepalm-field-attr-badge,
+                    .leaflet-control .widget-box.datepalm-field-attr-badge,
+                    .leaflet-control .jupyter-widgets.datepalm-field-attr-badge {
+                        background: rgba(255,255,255,0.20) !important;
+                        backdrop-filter: blur(6px) !important;
+                        -webkit-backdrop-filter: blur(6px) !important;
+                        border: 1px solid rgba(148,163,184,0.25) !important;
+                        border-radius: 12px !important;
+                        box-shadow: 0 8px 24px rgba(15,23,42,0.10) !important;
+                    }
+
+                    .leaflet-control .sensor-attr-badge,
+                    .leaflet-control .widget-box.sensor-attr-badge,
+                    .leaflet-control .jupyter-widgets.sensor-attr-badge {
+                        background: rgba(255,255,255,0.20) !important;
+                        backdrop-filter: blur(4px) !important;
+                        -webkit-backdrop-filter: blur(4px) !important;
+                        border: 1px solid rgba(148,163,184,0.25) !important;
+                        border-radius: 12px !important;
+                        box-shadow: 0 8px 24px rgba(15,23,42,0.10) !important;
+                    }
+
+                    .leaflet-top.leaflet-right {
+                        display: flex;
+                        flex-direction: column;
+                        align-items: flex-end;
+                    }
+
+                    .leaflet-top.leaflet-right .leaflet-control-layers {
+                        order: 1;
+                        margin-bottom: 8px;
+                    }
+
+                    .leaflet-top.leaflet-right .leaflet-control:has(.raster-legend-panel),
+                    .leaflet-top.leaflet-right .leaflet-control:has(.field-density-legend-panel),
+                    .leaflet-top.leaflet-right .leaflet-control:has(.tree-health-legend-panel) {
+                        order: 2;
+                    }
+
+                    .leaflet-control .national-figure-panel {
+                        background: rgba(255,255,255,0.20) !important;
+                        backdrop-filter: blur(6px);
+                        border-radius: 10px;
+                        box-shadow: 0 8px 24px rgba(15,23,42,0.12);
+                    }
+
+                    .leaflet-control .widget-box.national-figure-panel,
+                    .leaflet-control .jupyter-widgets.national-figure-panel {
+                        background: rgba(255,255,255,0.20) !important;
+                    }
+
+                    .leaflet-popup.tree-health-top-center-popup {
+                        margin-left: -210px !important;
+                        margin-top: 0 !important;
+                    }
+
+                    .leaflet-popup.tree-health-top-center-popup .leaflet-popup-tip-container {
+                        display: none !important;
+                    }
+
+                    .leaflet-popup.tree-health-top-center-popup .leaflet-popup-content-wrapper {
+                        background: transparent !important;
+                        box-shadow: none !important;
+                        border: none !important;
+                        padding: 0 !important;
+                    }
+
+                    .leaflet-popup.tree-health-top-center-popup .leaflet-popup-content {
+                        margin: 0 !important;
+                    }
+                """)
+
+                solara.display(m)
+                _loading_badge()
+
         Toast(
             message=toast_state["message"],
             kind=toast_state["kind"],
             visible=toast_state["visible"],
             on_close=hide_toast,
         )
-
     return
