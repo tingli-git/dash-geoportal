@@ -3025,6 +3025,7 @@ def Page():
                 "background": "transparent",
                 "color": "#0f172a",
                 "border": "1px solid #cbd5f5",
+                "opacity": 0.8,   
             })
         return base
 
