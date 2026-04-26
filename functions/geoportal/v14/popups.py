@@ -19,10 +19,11 @@ def _ensure_tree_health_badge_css() -> None:
 
     display(HTML("""
     <style>
-    .tree-health-attr-badge {
+    .tree-health-attr-badge,
+    .datepalm-field-attr-bage {
         background: rgba(255, 255, 255, 0.20) !important;
-        backdrop-filter: blur(0.1px);
-        -webkit-backdrop-filter: blur(0.1px);
+        backdrop-filter: blur(1px);
+        -webkit-backdrop-filter: blur(1px);
         border: 1px solid rgba(148, 163, 184, 0.25);
         border-radius: 12px;
         box-shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
@@ -185,6 +186,112 @@ def _ensure_tree_health_badge_dismiss_listener(m: ipyleaflet.Map) -> None:
     try:
         m.on_interaction(_on_interaction)
         setattr(m, "_tree_health_badge_listener_attached", True)
+    except Exception:
+        pass
+#date palm field bagge
+def show_date_palm_field_province_badge(
+    m: ipyleaflet.Map,
+    props: Optional[dict[str, Any]],
+) -> None:
+    _ensure_tree_health_badge_css()
+    _ensure_tree_health_badge_dismiss_listener(m)
+    clear_tree_health_badge(m)
+
+    title = W.HTML(
+        value=(
+            "<div style='"
+            "font-weight:800;"
+            "font-size:clamp(0.95rem, 0.8rem + 0.55vw, 1.2rem);"
+            "line-height:1.2;"
+            "color:#0f172a;"
+            "margin:0 2.2rem 0 0;"
+            "'>Date Palm Field Attributes</div>"
+        )
+    )
+
+    close_btn = W.Button(
+        description="×",
+        tooltip="Close",
+        layout=W.Layout(width="2rem", height="2rem", min_width="2rem", padding="0"),
+    )
+    close_btn.style.button_color = "rgba(255,255,255,0)"
+    close_btn.style.font_weight = "700"
+
+    table = W.HTML(
+        value=(
+            "<div style='"
+            "width:100%;"
+            "max-width:min(36rem, 42vw);"
+            "max-height:min(58vh, 32rem);"
+            "overflow:auto;"
+            "background:transparent;"
+            "border-radius:12px;"
+            "padding:0.55rem 0.75rem 0.7rem 0.75rem;"
+            "font-size:clamp(0.72rem, 0.6rem + 0.38vw, 0.98rem);"
+            "line-height:1.35;"
+            "'>"
+            "<table style='border-collapse:collapse;width:100%'>"
+            f"{_props_table_html(props)}"
+            "</table>"
+            "</div>"
+        )
+    )
+
+    header = W.HBox(
+        [title, close_btn],
+        layout=W.Layout(
+            justify_content="space-between",
+            align_items="center",
+            padding="0.55rem 0.75rem 0.1rem 0.75rem",
+            margin="0",
+        ),
+    )
+
+    body = W.VBox(
+        [header, table],
+        layout=W.Layout(
+            width="min(21rem, 25vw)",
+            min_width="16rem",
+            max_width="25vw",
+            max_height="min(62vh, 36rem)",
+            overflow="hidden",
+            padding="0",
+        ),
+    )
+
+    wrapper = W.Box(
+        [body],
+        layout=W.Layout(
+            padding="0",
+            margin="0",
+            background="rgba(255,255,255,0.20)",
+            border="1px solid rgba(148,163,184,0.25)",
+            border_radius="12px",
+            box_shadow="0 8px 24px rgba(15,23,42,0.40)",
+        ),
+    )
+
+    try:
+        wrapper.add_class("datepalm-field-attr-badge")
+    except Exception:
+        pass
+
+    control = ipyleaflet.WidgetControl(
+        widget=wrapper,
+        position="topleft",
+        transparent_bg=True,
+    )
+
+    setattr(m, "_tree_health_badge_control", control)
+
+    def _close(*_):
+        clear_tree_health_badge(m)
+
+    close_btn.on_click(_close)
+    setattr(m, "_suppress_next_tree_health_badge_close", True)
+
+    try:
+        m.add(control)
     except Exception:
         pass
 
@@ -403,6 +510,10 @@ def show_sensor_attribute_badge(
 def show_tree_health_badge(
     m: ipyleaflet.Map,
     props: Optional[dict[str, Any]],
+    *,
+    title_text: str = "Tree Health Attributes",
+    on_show_timeseries: Optional[Callable[[dict], W.Widget | None]] = None,
+    timeseries_button_label: Optional[str] = None,
 ) -> None:
     _ensure_tree_health_badge_css()
     _ensure_tree_health_badge_dismiss_listener(m)
@@ -416,7 +527,7 @@ def show_tree_health_badge(
             "line-height:1.2;"
             "color:#0f172a;"
             "margin:0 2.2rem 0 0;"
-            "'>Tree Health Attributes</div>"
+            f"'>{title_text}</div>"
         )
     )
 
@@ -458,14 +569,40 @@ def show_tree_health_badge(
         ),
     )
 
+    children: list[W.Widget] = [header, table]
+    if on_show_timeseries is not None:
+        ts_btn = W.Button(
+            description=timeseries_button_label or "Show Time Series",
+            button_style="primary",
+            layout=W.Layout(width="auto", margin="0.15rem 0.75rem 0.75rem 0.75rem"),
+            tooltip="Open the related time series",
+        )
+        out = W.Output(layout=W.Layout(display="block", margin="0 0.75rem 0.75rem 0.75rem"))
+
+        def _show_series(*_):
+            out.clear_output(wait=True)
+            try:
+                widget = on_show_timeseries(props or {})
+                with out:
+                    if widget is not None:
+                        display(widget)
+                    else:
+                        display(W.HTML("<i>No figure to show.</i>"))
+            except Exception as e:
+                with out:
+                    display(W.HTML(f"<pre>Failed to load time series: {e}</pre>"))
+
+        ts_btn.on_click(_show_series)
+        children.extend([ts_btn, out])
+
     body = W.VBox(
-        [header, table],
+        children,
         layout=W.Layout(
             width="min(21rem, 25vw)",   # 20% narrower
             min_width="16rem",
             max_width="25vw",
             max_height="min(62vh, 36rem)",
-            overflow="hidden",
+            overflow="auto" if on_show_timeseries is not None else "hidden",
             padding="0",
         ),
     )

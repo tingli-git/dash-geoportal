@@ -9,11 +9,24 @@
 # cd /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/
 # source .venv/bin/activate
 # python -m pip install -e .
+"""
+unset DATEPALMS_PROVINCE_HTTP_BASE
+unset DATEPALMS_HTTP_BASE
+unset DATEPALMS_HTTP_URL
+unset DATEPALMS_TILE_BASE_URL
+unset RASTER_TILES_HTTP_BASE
+unset CENTER_PIVOT_HTTP_BASE
+unset KSA_BOUNDS_HTTP_URL
+export GEOPORTAL_AUTH_USERNAME=ksa_palmdash
+export GEOPORTAL_AUTH_PASSWORD='kaust_palms!1'
+"""
 # solara run --production /datawaha/esom/Ting/Projects/DatePlamMapping/gitrepo/dash-geoportal/functions/geoportal/v14/app.py 
 ## if solara not founded, run $ hash -r 
 # solara application will be running at localhost:8765
 # ------------------------------------
 # in the third terminal 
+# 
+
 # cloudflared tunnel --url http://localhost:8765
 # copy the url that can be shared to others
 from __future__ import annotations
@@ -59,7 +72,7 @@ from functions.geoportal.v14.tree_health_loader import build_tree_health_layer, 
 from functions.geoportal.v14.datepalm_province_loader import list_date_palm_provinces
 from functions.geoportal.v14.field_density_loader import build_field_density_layer
 from functions.geoportal.v14.lookup import FieldLookup
-from functions.geoportal.v14.popups import show_popup, clear_tree_health_badge, clear_sensor_badges
+from functions.geoportal.v14.popups import show_popup, show_date_palm_field_province_badge, clear_tree_health_badge, clear_sensor_badges
 from functions.geoportal.v14.utils import html_table_popup
 from functions.geoportal.v14.cloud_assets import asset_url_for, ensure_local_asset, ensure_local_directory, read_asset_bytes, guess_content_type, gcs_enabled, force_gcs_enabled, set_force_gcs, last_fetch_info
 
@@ -783,7 +796,9 @@ def Page():
     solara.use_effect(_refresh_fetch_debug, [active_product, force_gcs, selected_date_palm_province, current_zoom, loading_message])
 
     def _touch_authenticated_session():
-        if _auth_enabled() and authenticated:
+        # Only extend sessions that are still valid. This prevents a stale
+        # restored UI state from reviving an expired login on reconnect.
+        if _auth_enabled() and authenticated and _auth_session_is_valid(session_id):
             _touch_auth_session(session_id)
 
     solara.use_effect(
@@ -2101,18 +2116,14 @@ def Page():
             return lat, lon
 
         def _on_click(event, feature, **kwargs):
-            coords = None
-            if isinstance(event, dict):
-                coords = event.get("coordinates")
-            if not coords:
-                coords = kwargs.get("coordinates")
-            normalized = _normalize_click_coords(coords)
-            if not normalized:
-                return
             props = feature.get("properties") if isinstance(feature, dict) else {}
-            props = props or {}
-            lat, lon = normalized
-            show_popup(m, lat, lon, props, None, refs.active_marker_ref)
+            props = dict(props or {})
+
+            props.pop("style", None)
+            props.pop("_style", None)
+            props.pop("visual_style", None)
+
+            show_date_palm_field_province_badge(m, props)
 
         layer.on_click(_on_click)
         if layer not in m.layers:
@@ -2814,25 +2825,7 @@ def Page():
                     f"`Deploy:` {'production' if IS_PRODUCTION else 'development'}",
                     style={"fontSize": "0.95rem", "color": "#475569", "margin": "0"},
                 )
-            fetch_info = last_fetch_info()
-            with solara.Card(
-                "",
-                style={"padding": "0.5rem 0.75rem", "marginBottom": "0.75rem", "background": "rgba(248,250,252,0.7)"},
-            ):
-                solara.Markdown("**Last Asset Fetch**", style={"fontSize": "1.0rem", "margin": "0 0 0.35rem 0", "color": "#334155"})
-                solara.Markdown(
-                    "\n".join(
-                        [
-                            f"`mode:` {fetch_info.get('mode') or '-'}",
-                            f"`source:` {fetch_info.get('source') or '-'}",
-                            f"`path:` {fetch_info.get('path') or '-'}",
-                            f"`resolved:` {fetch_info.get('resolved_path') or '-'}",
-                            f"`object:` {fetch_info.get('object_name') or '-'}",
-                            f"`detail:` {fetch_info.get('detail') or '-'}",
-                        ]
-                    ),
-                    style={"fontSize": "0.88rem", "margin": "0", "color": "#475569"},
-                )
+            
             # Product buttons let the user switch between map layers / analytics products.
             with solara.Row(
                 gap="0.5rem",
@@ -2905,10 +2898,13 @@ def Page():
                          
                 .leaflet-control .tree-health-attr-badge,
                 .leaflet-control .widget-box.tree-health-attr-badge,
-                .leaflet-control .jupyter-widgets.tree-health-attr-badge {
+                .leaflet-control .jupyter-widgets.tree-health-attr-badge,
+                .leaflet-control .datepalm-field-attr-badge,
+                .leaflet-control .widget-box.datepalm-field-attr-badge,
+                .leaflet-control .jupyter-widgets.datepalm-field-attr-badge {
                     background: rgba(255,255,255,0.20) !important;
-                    backdrop-filter: blur(4px) !important;
-                    -webkit-backdrop-filter: blur(4px) !important;
+                    backdrop-filter: blur(6px) !important;
+                    -webkit-backdrop-filter: blur(6px) !important;
                     border: 1px solid rgba(148,163,184,0.25) !important;
                     border-radius: 12px !important;
                     box-shadow: 0 8px 24px rgba(15,23,42,0.10) !important;
