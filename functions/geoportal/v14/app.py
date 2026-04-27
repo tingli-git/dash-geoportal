@@ -790,6 +790,7 @@ def Page():
     refs = ReactiveRefs()
     ts_overlay_fig, set_ts_overlay_fig = solara.use_state(None)
     ts_overlay_title, set_ts_overlay_title = solara.use_state("")
+    ts_overlay_open, set_ts_overlay_open = solara.use_state(False)
     
 
     default_tiles_dir = str(getattr(CFG, "default_tiles_dir", _APP_SERVER_ROOT / "38RLQ_2024"))
@@ -894,6 +895,7 @@ def Page():
     active_product_ref = solara.use_ref(None)
     default_national_applied_ref = solara.use_ref(False)
     center_pivot_legend_control_ref = solara.use_ref(None)
+    
     
     if not authenticated:
         _LoginGate(lambda: set_authenticated(True), session_id)
@@ -1757,44 +1759,117 @@ def Page():
         product_switching_ref.current = False
 
     def _clear_popups():
+        def _widget_contains_text(widget, needles):
+            if widget is None:
+                return False
+
+            try:
+                text = " ".join(
+                    [
+                        str(getattr(widget, "value", "") or ""),
+                        str(getattr(widget, "description", "") or ""),
+                        " ".join(getattr(widget, "_dom_classes", ()) or ()),
+                        type(widget).__name__,
+                    ]
+                )
+                if any(needle in text for needle in needles):
+                    return True
+            except Exception:
+                pass
+
+            try:
+                for child in getattr(widget, "children", []) or []:
+                    if _widget_contains_text(child, needles):
+                        return True
+            except Exception:
+                pass
+
+            return False
+
+        # Remove Leaflet popups, but keep persistent hint popups.
         try:
             for layer in list(m.layers):
-                if isinstance(layer, ipyleaflet.Popup):
-                    if getattr(layer, "_is_geojson_hint", False):
-                        continue
-                    if getattr(layer, "_is_tree_health_hint", False):
-                        continue
-                    m.remove_layer(layer)
+                if not isinstance(layer, ipyleaflet.Popup):
+                    continue
+                if getattr(layer, "_is_geojson_hint", False):
+                    continue
+                if getattr(layer, "_is_tree_health_hint", False):
+                    continue
+                m.remove_layer(layer)
         except Exception:
             pass
+
+        # Remove tracked time-series badge/control.
+        try:
+            old_control = timeseries_badge_control_ref.current
+            if old_control is not None:
+                try:
+                    m.remove_control(old_control)
+                except Exception:
+                    pass
+                timeseries_badge_control_ref.current = None
+        except Exception:
+            pass
+
+        # Remove any untracked leftover time-series controls.
+        try:
+            needles = (
+                "Sensor time series",
+                "No figure to show",
+                "timeseries",
+                "time-series",
+                "timeseries-overlay",
+            )
+
+            for control in list(getattr(m, "controls", [])):
+                widget = getattr(control, "widget", None)
+                if _widget_contains_text(widget, needles):
+                    try:
+                        m.remove_control(control)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # Remove product-specific badges.
         try:
             clear_tree_health_badge(m)
         except Exception:
             pass
+
         try:
             clear_sensor_badges(m, refs.active_marker_ref)
         except Exception:
             pass
+
+        # Reset popup/selection state.
         field_popup_ref.current = None
+        refs.active_marker_ref.current = None
+
         set_field_info(None)
         set_click_point(None)
         set_hover_point(None)
         set_hover_field_record(None)
+
+        # Reset Solara time-series overlay state.
         set_ts_overlay_fig(None)
         set_ts_overlay_title("")
+
+        # Remove highlight layers.
         for attr in ("_datepalms_highlight_layer", "_cpf_highlight_layer"):
             try:
                 existing = getattr(m, attr, None)
-                if existing and (existing in m.layers):
+                if existing and existing in m.layers:
                     m.remove_layer(existing)
                 setattr(m, attr, None)
             except Exception:
                 pass
-        refs.active_marker_ref.current = None
+
         try:
             clear_tree_health_highlight()
         except Exception:
             pass
+        
     def _clear_all_product_layers_immediately():
         _clear_popups()
 
@@ -3174,23 +3249,30 @@ def Page():
 
     # Markers / popups
     def on_show_timeseries(props: dict):
+        set_ts_overlay_open(False)
+        set_ts_overlay_fig(None)
+        set_ts_overlay_title("")
+
         try:
             csv_path = resolve_csv_path(props)
             df = read_timeseries(csv_path)
+
             title = (
                 f"Sensor time series — "
                 f"{props.get('name') or props.get('sensor_id') or props.get('id') or csv_path.stem}"
             )
 
             fig = build_timeseries_figure(df, title, width=None, height=720)
-            set_ts_overlay_fig(fig)
-            set_ts_overlay_title(title)
 
-            # Prevent show_popup() from placing the plot below sensor attributes
-            return W.HTML(value="")
+            if fig is not None and getattr(fig, "data", None):
+                set_ts_overlay_title(title)
+                set_ts_overlay_fig(fig)
+                set_ts_overlay_open(True)
+
         except Exception as e:
             show_toast(str(e), "error")
-            return W.HTML(f"<pre>{e}</pre>")
+
+        return
 
     def _build_group():
         if active_product != PRODUCT_SENSORS:
@@ -3950,7 +4032,7 @@ def Page():
                 """)
 
                 solara.display(m)
-                if ts_overlay_fig is not None:
+                if ts_overlay_open and ts_overlay_fig is not None and getattr(ts_overlay_fig, "data", None):
                     with solara.Div(
                         style={
                             "position": "absolute",
@@ -3978,7 +4060,15 @@ def Page():
                             }
                         ):
                             solara.Markdown(f"**{ts_overlay_title}**")
-                            solara.Button("×", text=True, on_click=lambda: set_ts_overlay_fig(None))
+                            solara.Button(
+                                "×",
+                                text=True,
+                                on_click=lambda: (
+                                    set_ts_overlay_open(False),
+                                    set_ts_overlay_fig(None),
+                                    set_ts_overlay_title("")
+                                )
+                            )
 
                         with solara.Div(
                             classes=["timeseries-overlay-plot"],

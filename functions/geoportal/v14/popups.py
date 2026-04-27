@@ -448,12 +448,8 @@ def show_sensor_attribute_badge(
         )
 
         def _show_series(*_):
-            widget = on_show_timeseries(props or {})
-            title_text = (
-                f"Sensor time series — "
-                f"{(props or {}).get('name') or (props or {}).get('sensor_id') or (props or {}).get('id') or 'Sensor'}"
-            )
-            show_sensor_timeseries_badge(m, widget, title=title_text)
+            clear_sensor_timeseries_badge(m)
+            on_show_timeseries(props or {})
 
         ts_btn.on_click(_show_series)
         button_row.append(ts_btn)

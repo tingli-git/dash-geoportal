@@ -81,7 +81,8 @@ _PALETTES = {
 # ------------------------------
 _DEFAULT_TS = SimpleNamespace(
     # Used when callers do not pass an explicit height.
-    base_height=820,
+    base_height=570,
+    base_width = 1200,
     min_height=540,
     gap_frac=0.0,
     max_layers=9,
@@ -93,11 +94,21 @@ _DEFAULT_TS = SimpleNamespace(
     font_family="Arial",
     font_size=14,
     title_font_size=20,
-    axis_title_font_size=18,
+    axis_title_font_size=16,
     tick_font_size=14,
-    annotation_font_size=12,
+    annotation_font_size=14,
     hover_font_size=13,
     line_width=2,
+    # Responsive Plotly layout settings.
+    # Keep y-axis label annotations INSIDE the Plotly paper area.
+    # The x-axis domain starts after this reserved label/tick zone, so
+    # y-labels stay visible when the parent container is resized.
+    plot_domain_left=0.1, # where you start the plot
+    y_label_x=0.02, # from left edge print the ylabel
+    margin_l=4,
+    margin_r=24,
+    margin_t=20,
+    margin_b=45,
     # Soil moisture settings. These are fallbacks if CFG.timeseries lacks them.
     sm_column="soil_moisture_root_zone",
     sm_region_thresholds=(10, 20, 30),
@@ -219,8 +230,10 @@ def _apply_common_layout_dual(
     labels_bottom: list[str],
 ) -> None:
     n = len(labels_bottom) if labels_bottom else 1
-    height = max(int(_ts_param("min_height")), int(height))
+    height = int(height) if height is not None else int(_ts_param("base_height"))
 
+    # clamp to reasonable bounds
+    #height = max(500, min(height, 1200))
     font_family = _ts_param("font_family")
     font_size = int(_ts_param("font_size"))
     axis_title_font_size = int(_ts_param("axis_title_font_size"))
@@ -231,29 +244,38 @@ def _apply_common_layout_dual(
         title=None,
         autosize=True,
         width=None,
-        height=height,
-        margin=dict(l=120, r=30, t=40, b=150),
+        height=None,
+        margin=dict(
+            l=int(_ts_param("margin_l")),
+            r=int(_ts_param("margin_r")),
+            t=int(_ts_param("margin_t")),
+            b=int(_ts_param("margin_b")),
+        ),
         showlegend=False,
         hovermode="x unified",
         transition_duration=0,
         font=dict(family=font_family, size=font_size),
         hoverlabel=dict(font_size=hover_font_size, font_family=font_family),
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-    )
+        paper_bgcolor="rgba(255,255,255,0.65)",
+        plot_bgcolor="rgba(255,255,255,0.565)",
+        )
+
+    # Reserve a stable internal column on the left for rotated y-label annotations
+    # and y tick labels. This avoids negative paper coordinates, which can be
+    # clipped by responsive containers.
+    plot_domain_left = float(_ts_param("plot_domain_left"))
+    plot_domain_left = min(max(plot_domain_left, 0.08), 0.35)
+    fig.update_xaxes(domain=[plot_domain_left, 1.0])
 
     fig.update_xaxes(
         row=2,
         col=1,
         type="date",
-        tickformat="%Y-%m-%d",
-        tickformatstops=[dict(dtickrange=[None, None], value="%Y-%m-%d")],
-        showgrid=True,
         title_text="Time",
         title_font=dict(size=axis_title_font_size),
         tickfont=dict(size=tick_font_size),
         tickangle=0,
-        automargin=True,
+        automargin=True,   # ← THIS is key
     )
 
     # Remove native y-axis titles. They shift because the two panels have
@@ -283,14 +305,15 @@ def _apply_common_layout_dual(
 
     top_domain = fig.layout.yaxis.domain
     bottom_domain = fig.layout.yaxis2.domain
-    y_label_x = -0.2 # control the ylabel axis location 
+    y_label_x = float(_ts_param("y_label_x"))  # must stay inside [0, plot_domain_left)
+    y_label_x = min(max(y_label_x, 0.0), max(0.0, plot_domain_left - 0.02))
 
     fig.add_annotation(
         xref="paper",
         yref="paper",
         x=y_label_x,
         y=(top_domain[0] + top_domain[1]) / 2,
-        text="Soil moisture (root zone, %)",
+        text=" % (root zone)",
         showarrow=False,
         textangle=-90,
         font=dict(size=axis_title_font_size, family=font_family),
@@ -303,7 +326,7 @@ def _apply_common_layout_dual(
         yref="paper",
         x=y_label_x,
         y=(bottom_domain[0] + bottom_domain[1]) / 2,
-        text="Soil moisture (per depth layer, %)",
+        text="% (per depth layer)",
         showarrow=False,
         textangle=-90,
         font=dict(size=axis_title_font_size, family=font_family),
@@ -359,8 +382,8 @@ def build_timeseries_figure(
         rows=2,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.08,
-        row_heights=[0.9, 1.6],
+        vertical_spacing=0.05,
+        row_heights=[0.85, 1.5],
     )
 
     # ---------- TOP subplot: root-zone soil moisture ----------
@@ -409,13 +432,14 @@ def build_timeseries_figure(
         for txt, yline in zip(labels_top, y_lines):
             fig.add_annotation(
                 xref="paper",
-                x=0.01,
+                x=float(_ts_param("plot_domain_left")) + 0.01,
                 yref="y1",
                 y=yline + dy,
                 text=txt,
                 showarrow=False,
                 font=dict(size=annotation_font_size, color="#333"),
                 align="left",
+                xanchor="left",
             )
 
     # ---------- BOTTOM subplot: stacked depth bands ----------
@@ -487,7 +511,7 @@ def build_timeseries_figure(
 
     _apply_common_layout_dual(
         fig,
-        height=int(height if height is not None else _ts_param("base_height")),
+        height=int(height) if height is not None else int(_ts_param("base_height")),
         gap_frac=gap_frac,
         labels_bottom=labels,
     )
@@ -516,16 +540,14 @@ def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series")
 # ------------------------------
 # Backward-compatible wrapper for older callers
 # ------------------------------
-def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
+def build_plotly_widget(df: pd.DataFrame, title: str):
     """
     Deprecated compatibility wrapper.
 
-    Current app.py should call build_timeseries_figure(...) and render the result
-    with solara.FigurePlotly(...). This wrapper remains only so older imports do
-    not fail.
+    Do not create go.FigureWidget here because it can leave orphan ipywidget
+    comms in Solara/ipyleaflet.
     """
     if df is None or df.empty:
-        return W.HTML("<i>No data to plot.</i>")
+        return None
 
-    fig = build_timeseries_figure(df, title)
-    return go.FigureWidget(fig)
+    return build_timeseries_figure(df, title)
