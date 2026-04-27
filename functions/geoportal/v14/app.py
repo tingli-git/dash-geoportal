@@ -681,9 +681,7 @@ def Page():
 
     solara.use_effect(_sync_auth_session, [session_id, authenticated])
 
-    if not authenticated:
-        _LoginGate(lambda: set_authenticated(True), session_id)
-        return
+    
 
     # UI state
     geojson_path, set_geojson_path = solara.use_state(str(CFG.default_geojson))
@@ -721,11 +719,28 @@ def Page():
     cp_year_index, set_cp_year_index = solara.use_state(
         index_by_year.get(int(getattr(CFG, "center_pivot_default_year", years[-1])), 0)
     )
-    cp_opacity, set_cp_opacity = solara.use_state(0.6)
+
+    # Base + comparison opacity
+    cp_base_opacity, set_cp_base_opacity = solara.use_state(0.65)
+    cp_compare_opacity, set_cp_compare_opacity = solara.use_state(0.3)
+
+    # Comparison controls
+    cp_compare_year_index, set_cp_compare_year_index = solara.use_state(
+        1 if len(years) > 1 else 0
+    )
+    cp_compare_enabled, set_cp_compare_enabled = solara.use_state(False)
+
     cp_use_http, set_cp_use_http = solara.use_state(True)
     cp_clip_roi_enabled, set_cp_clip_roi_enabled = solara.use_state(True)
 
-    cp_layer, set_cp_layer = solara.use_state(None)
+    # Layers
+    cp_base_layer, set_cp_base_layer = solara.use_state(None)
+    cp_compare_layer, set_cp_compare_layer = solara.use_state(None)
+
+    # 🔧 TEMP FIX: keep compatibility with old code
+    cp_layer = cp_base_layer
+        
+    
     ksa_layer = None
     province_names, set_province_names = solara.use_state(list(getattr(CFG, "datepalms_province_names", ())))
     selected_date_palm_province, set_selected_date_palm_province = solara.use_state(None)
@@ -772,6 +787,9 @@ def Page():
     loading_product_ref = solara.use_ref(None)
     active_product_ref = solara.use_ref(None)
     default_national_applied_ref = solara.use_ref(False)
+    if not authenticated:
+        _LoginGate(lambda: set_authenticated(True), session_id)
+        return
 
 
     def _loading_badge():
@@ -1645,14 +1663,19 @@ def Page():
     solara.use_effect(_attach_popup_watchers, [m])
 
     def _refresh_cp_layer():
-        nonlocal cp_layer
-        if cp_layer and (cp_layer in m.layers):
-            try:
-                m.remove_layer(cp_layer)
-            except Exception:
-                pass
-        cp_layer = None
-        set_cp_layer(None)
+        nonlocal cp_base_layer, cp_compare_layer
+
+        for layer in (cp_base_layer, cp_compare_layer):
+            if layer and (layer in m.layers):
+                try:
+                    m.remove_layer(layer)
+                except Exception:
+                    pass
+
+        cp_base_layer = None
+        cp_compare_layer = None
+        set_cp_base_layer(None)
+        set_cp_compare_layer(None)
 
     def _slider_float(label, value, setter, min_val, max_val, step, width="240px"):
         return solara.Div(
@@ -1676,10 +1699,10 @@ def Page():
         if bounds:
             _fit_bounds(bounds)
 
-    def _render_cp_year_buttons():
+    def _render_cp_year_buttons(selected_index, setter):
         buttons = []
         for year in years:
-            is_active = year_index_map.get(cp_year_index) == year
+            is_active = year_index_map.get(selected_index) == year
             btn_style = {
                 "minWidth": "62px",
                 "padding": "0.35rem 0.65rem",
@@ -1695,7 +1718,7 @@ def Page():
                     str(year),
                     text=True,
                     style=btn_style,
-                    on_click=lambda _event=None, target=year: (_on_cp_year_change(index_by_year.get(target, 0))),
+                    on_click=lambda _event=None, target=year: (setter(index_by_year.get(target, 0))),
                 )
             )
         return solara.Row(
@@ -2001,34 +2024,74 @@ def Page():
             )
         if product == PRODUCT_CENTER_PIVOT:
             return solara.Column(
-                gap="0.55rem",
+                gap="0.75rem",
                 style={"width": "100%"},
                 children=[
+                    solara.Markdown(
+                        "Base year",
+                        style={
+                            "fontSize": "var(--font-section-title)",
+                            "fontWeight": "700",
+                            "margin": "0",
+                        },
+                    ),
+                    _render_cp_year_buttons(cp_year_index, _on_cp_year_change),
+
                     solara.Div(
-                        style={"width": "100%"},
+                        style={"width": "260px"},
+                        children=[
+                            _slider_float(
+                                "Base opacity",
+                                cp_base_opacity,
+                                set_cp_base_opacity,
+                                0.05,
+                                1.0,
+                                0.05,
+                                width="260px",
+                            ),
+                        ],
+                    ),
+
+                    solara.Switch(
+                        label="Compare with another year",
+                        value=cp_compare_enabled,
+                        on_value=set_cp_compare_enabled,
+                    ),
+
+                    solara.Div(
+                        style={
+                            "display": "block" if cp_compare_enabled else "none",
+                            "width": "100%",
+                        },
                         children=[
                             solara.Markdown(
-                                "Year",
+                                "Comparison year",
                                 style={
                                     "fontSize": "var(--font-section-title)",
                                     "fontWeight": "700",
                                     "margin": "0 0 0.25rem 0",
                                 },
                             ),
-                            _render_cp_year_buttons(),
-                        ],
-                    ),
-                    solara.Div(
-                        style={"width": "260px"},
-                        children=[
-                            _slider_float(
-                                "Opacity",
-                                cp_opacity,
-                                set_cp_opacity,
-                                0.1,
-                                1.0,
-                                0.05,
-                                width="260px",
+                            _render_cp_year_buttons(
+                                cp_compare_year_index,
+                                lambda value: (
+                                    _refresh_cp_layer(),
+                                    set_cp_compare_year_index(value),
+                                ),
+                            ),
+                            solara.Div(
+                                style={"width": "260px", "marginTop": "0.5rem"},
+                                children=[
+                                    _slider_float(
+                                        "Comparison opacity",
+                                        cp_compare_opacity,
+                                        set_cp_compare_opacity,
+                                        0.05,
+                                        1.0,
+                                        0.05,
+                                        width="260px",
+                                    ),
+                                ],
                             ),
                         ],
                     ),
@@ -2736,63 +2799,124 @@ def Page():
     # -------------------------
     # Center-Pivot build/attach helpers
     # -------------------------
+    def _style_cp_layer(layer, role, opacity):
+        if layer is None:
+            return
+
+        color = "#4daf4a" if role == "base" else "#e41a1c"
+
+        style = {
+            "fillColor": color,
+            "color": color,
+            "fillOpacity": float(opacity),
+            "opacity": float(opacity),
+            "weight": 1.2,
+        }
+
+        # 1. Apply to vector tile styles (THIS is the key)
+        try:
+            existing = getattr(layer, "vector_tile_layer_styles", {}) or {}
+            if existing:
+                layer.vector_tile_layer_styles = {
+                    k: style for k in existing.keys()
+                }
+            else:
+                layer.vector_tile_layer_styles = {"*": style}
+        except Exception:
+            pass
+
+        # 2. Fallback (harmless)
+        try:
+            layer.style = style
+        except Exception:
+            pass
+
+
+    def _build_cp_year_layer(year):
+        clip_bbox = tuple(getattr(CFG, "center_pivot_default_roi", (24.0, 40.0, 28.0, 45.0))) if cp_clip_roi_enabled else None
+
+        layer, err = build_center_pivot_layer(
+            year,
+            visible=True,
+            use_http_url=bool(cp_use_http and (clip_bbox is None)),
+            clip_to_bbox=clip_bbox,
+            m=m,
+            active_marker_ref=refs.active_marker_ref,
+        )
+
+        if err:
+            show_toast(err, "error")
+            return None
+
+       
+        setattr(layer, "_year", year)
+        return layer
+
+
     def _ensure_cp_layer():
-        nonlocal cp_layer
-        print(f"[CPF] active={active_product} cp_layer_set={cp_layer is not None}")
+        nonlocal cp_base_layer, cp_compare_layer
+
         if active_product != PRODUCT_CENTER_PIVOT:
-            if cp_layer is not None and cp_layer in m.layers:
-                try:
-                    m.remove_layer(cp_layer)
-                except Exception:
-                    pass
-            return
-        target_year = year_index_map.get(cp_year_index)
-        existing_year = getattr(cp_layer, "_year", None)
-        if cp_layer is not None and existing_year != target_year:
-            if cp_layer in m.layers:
-                try:
-                    m.remove_layer(cp_layer)
-                except Exception:
-                    pass
-            cp_layer = None
-            set_cp_layer(None)
-        if cp_layer is None:
-            clip_bbox = tuple(getattr(CFG, "center_pivot_default_roi", (24.0, 40.0, 28.0, 45.0))) if cp_clip_roi_enabled else None
-
-            layer, err = build_center_pivot_layer(
-                year_index_map.get(cp_year_index, years[-1]),
-                visible=True,
-                use_http_url=bool(cp_use_http and (clip_bbox is None)),
-                clip_to_bbox=clip_bbox,
-                m=m,
-                active_marker_ref=refs.active_marker_ref,
-            )
-            if err:
-                show_toast(err, "error")
-                set_cp_layer(None)
-                return
-
-            try:
-                layer.style = {**(layer.style or {}), "fillOpacity": float(cp_opacity)}
-            except Exception:
-                pass
-
-            cp_layer = layer
-            set_cp_layer(layer)
-            setattr(layer, "_year", target_year)
-
-        if cp_layer is None:
+            for layer in (cp_base_layer, cp_compare_layer):
+                if layer and layer in m.layers:
+                    try:
+                        m.remove_layer(layer)
+                    except Exception:
+                        pass
             return
 
-        if cp_layer not in m.layers:
-            _insert_after(cp_layer, raster_layer)
-        roi_bounds = _roi_to_bounds(getattr(CFG, "center_pivot_default_roi", None))
-        #_maybe_fit_product(PRODUCT_CENTER_PIVOT, roi_bounds)
+        base_year = year_index_map.get(cp_year_index, years[-1])
+        compare_year = year_index_map.get(cp_compare_year_index, years[-1])
+
+        if cp_base_layer is None or getattr(cp_base_layer, "_year", None) != base_year:
+            if cp_base_layer and cp_base_layer in m.layers:
+                m.remove_layer(cp_base_layer)
+
+            cp_base_layer = _build_cp_year_layer(base_year)
+            _style_cp_layer(cp_base_layer, "base", cp_base_opacity)
+            set_cp_base_layer(cp_base_layer)
+
+        if cp_compare_enabled:
+            if cp_compare_layer is None or getattr(cp_compare_layer, "_year", None) != compare_year:
+                if cp_compare_layer and cp_compare_layer in m.layers:
+                    m.remove_layer(cp_compare_layer)
+
+                cp_compare_layer = _build_cp_year_layer(compare_year)
+                _style_cp_layer(cp_compare_layer, "compare", cp_compare_opacity)
+                set_cp_compare_layer(cp_compare_layer)
+        else:
+            if cp_compare_layer and cp_compare_layer in m.layers:
+                m.remove_layer(cp_compare_layer)
+            cp_compare_layer = None
+            set_cp_compare_layer(None)
+
+        if cp_base_layer and cp_base_layer not in m.layers:
+            _insert_after(cp_base_layer, raster_layer)
+
+        if cp_compare_enabled and cp_compare_layer and cp_compare_layer not in m.layers:
+            _insert_after(cp_compare_layer, cp_base_layer)
+
+        if cp_base_layer:
+            _style_cp_layer(cp_base_layer,"base", cp_base_opacity)
+
+        if cp_compare_layer:
+            _style_cp_layer(cp_compare_layer, "compare", cp_compare_opacity)
+
         _finish_loading(PRODUCT_CENTER_PIVOT)
-
+        
     solara.use_effect(
         _ensure_cp_layer,
-        [active_product, cp_year_index, cp_opacity, cp_use_http, cp_clip_roi_enabled, raster_layer],
+        [
+            active_product,
+            cp_year_index,
+            cp_compare_year_index,
+            cp_compare_enabled,
+            cp_base_opacity,
+            cp_compare_opacity,
+            cp_use_http,
+            cp_clip_roi_enabled,
+            raster_layer,
+        ],
     )
 
     # -------------------------
