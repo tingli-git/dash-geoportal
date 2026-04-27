@@ -887,6 +887,7 @@ def Page():
     raster_legend_control_ref = solara.use_ref(None)
     tree_health_legend_control_ref = solara.use_ref(None)
     national_figure_control_ref = solara.use_ref(None)
+    product_switching_ref = solara.use_ref(False)
     national_figure_closed, set_national_figure_closed = solara.use_state(False)
     loading_message, set_loading_message = solara.use_state(None)
     loading_product_ref = solara.use_ref(None)
@@ -929,7 +930,7 @@ def Page():
     def _sync_active_product_ref():
         active_product_ref.current = active_product
 
-    solara.use_effect(_sync_active_product_ref, [active_product])
+    solara.use_effect(_sync_active_product_ref, [active_product])  # noqa: SH101
 
     def _sync_force_gcs():
         set_force_gcs(force_gcs)
@@ -1551,17 +1552,18 @@ def Page():
     solara.use_effect(_init_ksa_layers, [m])
 
     def _sync_ksa_layer():
+        if product_switching_ref.current:
+            return
+
         active_layer = ksa_layer_area if active_product == PRODUCT_DATEPALM_FIELDS else ksa_layer_normal
         inactive_layer = ksa_layer_normal if active_product == PRODUCT_DATEPALM_FIELDS else ksa_layer_area
 
         if inactive_layer and inactive_layer in m.layers:
-            try:
-                m.remove_layer(inactive_layer)
-            except Exception:
-                pass
+            _remove_layer(inactive_layer)
 
         if active_layer and active_layer not in m.layers:
             _insert_after(active_layer, esri)
+            
     def _bring_layer_to_front(layer):
         if not layer or layer not in m.layers:
             return
@@ -1628,12 +1630,12 @@ def Page():
         """
         try:
             if product == PRODUCT_TREE_HEALTH:
-                #center = getattr(CFG, "tree_health_default_center", None)
-                #zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_TREE_HEALTH, 16)
-                #if center:
-                #    m.center = center
-                #if zoom:
-                #    m.zoom = zoom
+                center = getattr(CFG, "tree_health_default_center", None)
+                zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_TREE_HEALTH, 16)
+                if center:
+                    m.center = center
+                if zoom:
+                    m.zoom = zoom
                 return
 
             if product == PRODUCT_SENSORS:
@@ -1689,7 +1691,7 @@ def Page():
         if loading_product_ref.current == product:
             set_loading_message(None)
             loading_product_ref.current = None
-
+            product_switching_ref.current = False
 
     def _finish_loading_date_palm_fields_when_ui_ready():
         if active_product != PRODUCT_DATEPALM_FIELDS:
@@ -1708,24 +1710,23 @@ def Page():
     )
 
     def _maybe_fit_product(product: str, bounds):
-        print(f"[DEBUG fit request] pending={pending_fit_product.current} active={active_product} target={product} bounds_set={bounds is not None}")
         if pending_fit_product.current != product:
             return
         if not bounds:
             return
+
         if product == PRODUCT_TREE_HEALTH:
             center = _center_from_bounds(bounds)
             target_zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_TREE_HEALTH, 14)
-            try:
-                if center is not None:
-                    m.center = center
-                if getattr(m, "zoom", None) is not None and target_zoom is not None:
-                    m.zoom = target_zoom
-            except Exception as exc:
-                print(f"[DEBUG fit] failed to center Tree Health on {center}: {exc}")
+            if center is not None:
+                m.center = center
+            if target_zoom is not None:
+                m.zoom = target_zoom
         else:
             _fit_bounds(bounds)
+
         pending_fit_product.current = None
+        product_switching_ref.current = False
 
     def _clear_popups():
         try:
@@ -1766,7 +1767,70 @@ def Page():
             clear_tree_health_highlight()
         except Exception:
             pass
+    def _clear_all_product_layers_immediately():
+        _clear_popups()
 
+        # Remove raster/tree-vege
+        if raster_layer and raster_layer in m.layers:
+            _remove_layer(raster_layer)
+
+        # Remove sensors/icons
+        sensor_layer = sensor_layer_ref.current
+        if sensor_layer and sensor_layer in m.layers:
+            _remove_layer(sensor_layer)
+        sensor_layer_ref.current = None
+
+        # Remove Date Palm Fields vector tiles
+        for layer in list(date_palm_tile_layers.values()):
+            _remove_layer(layer)
+        set_date_palm_tile_layers({})
+
+        # Remove high-res GeoJSON and hover/highlight layers
+        _cleanup_highres_layer()
+
+        for ref in (hover_layer_ref, field_highlight_ref):
+            layer = ref.current
+            if layer and layer in m.layers:
+                _remove_layer(layer)
+            ref.current = None
+
+        # Remove Qassim date palm layers
+        for layer in (dp_layer_full, dp_layer_simple):
+            if layer and layer in m.layers:
+                _remove_layer(layer)
+
+        # Remove tree health
+        if th_layer and th_layer in m.layers:
+            _remove_layer(th_layer)
+        clear_tree_health_highlight()
+
+        # Remove field density
+        field_density_name = str(getattr(CFG, "field_density_layer_name", "Field density"))
+        for layer in list(m.layers):
+            if getattr(layer, "name", "") == field_density_name:
+                _remove_layer(layer)
+
+        # Remove center pivot layers
+        for layer in (cp_base_layer, cp_compare_layer, cp_change_layer):
+            if layer and layer in m.layers:
+                _remove_layer(layer)
+
+        for layer in list(m.layers):
+            if hasattr(layer, "_year"):
+                _remove_layer(layer)
+
+        # Remove CPF change layers by name
+        cpf_change_names = {
+            str(getattr(CFG, "cpf_change_expanding_layer_name", "CPF Expanding Dynamic")),
+            str(getattr(CFG, "cpf_change_contraction_layer_name", "CPF Contraction Dynamic")),
+        }
+        for layer in list(m.layers):
+            if getattr(layer, "name", "") in cpf_change_names:
+                _remove_layer(layer)
+
+        set_cp_base_layer(None)
+        set_cp_compare_layer(None)
+        set_cp_change_layer(None)
 
     def _non_popup_layer_signature():
         signature = []
@@ -3467,20 +3531,17 @@ def Page():
         if product == active_product:
             return
 
-        _clear_popups()
+        product_switching_ref.current = True
 
-        # 1. Move map immediately while the old layer is still visible.
+        _clear_all_product_layers_immediately()
         _precenter_product(product)
 
-        # 2. Then show loading state.
         loading_product_ref.current = product
         set_loading_message("Data Loading ...")
 
-        # 3. Still request final fit after data loads, in case exact bounds differ.
         if product != PRODUCT_DATEPALM_FIELDS:
             _request_fit(product)
 
-        # 4. Trigger product/layer change.
         set_active_product(product)
 
     def _product_button_style(product: str):
