@@ -534,12 +534,18 @@ def _cpf_change_legend_widget(change_variant: str):
         )
 
     title = str(getattr(CFG, "cpf_change_legend_title", "Center-Pivot change detection"))
-    subtitle = "Expanding dynamic" if change_variant == CP_CHANGE_EXPANDING else "Contraction dynamic"
+    if change_variant == CP_CHANGE_EXPANDING:
+        subtitle = "Expanding dynamic"
+        description = "Field establishment year range"
+    else:
+        subtitle = "Contraction dynamic"
+        description = "Last observed field year range (until 2021)"
     html = (
         "<div style='margin-top:1px;background:rgba(255,255,255,0.4);backdrop-filter: blur(6px);border:1px solid rgba(148,163,184,0.4);"
         "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:210px;display:inline-block;'>"
         f"<div style='fontSize: var(--font-section-title);font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
         f"<div style='font-size:var(--font-small);font-weight:600;color:#475569;margin-top:4px;'>{subtitle}</div>"
+        f"<div style='font-size:var(--font-small);color:#64748b;margin-top:2px;'>{description}</div>"
         f"{''.join(rows)}</div>"
     )
     panel = W.Box([W.HTML(value=html)], layout=W.Layout(padding="0", margin="0"))
@@ -782,6 +788,8 @@ def Page():
     fetch_debug_tick, set_fetch_debug_tick = solara.use_state(0)
     debounced_geojson = use_debounce(geojson_path, delay_ms=500)
     refs = ReactiveRefs()
+    ts_overlay_widget, set_ts_overlay_widget = solara.use_state(None)
+    ts_overlay_title, set_ts_overlay_title = solara.use_state("")
     ## turn off the below two line if not showing as page at the bottom of the map window
     #ts_title, set_ts_title = solara.use_state("")
     #ts_df, set_ts_df = solara.use_state(None)
@@ -1745,6 +1753,8 @@ def Page():
         set_click_point(None)
         set_hover_point(None)
         set_hover_field_record(None)
+        set_ts_overlay_widget(None)
+        set_ts_overlay_title("")
         for attr in ("_datepalms_highlight_layer", "_cpf_highlight_layer"):
             try:
                 existing = getattr(m, attr, None)
@@ -1817,8 +1827,8 @@ def Page():
     def _refresh_cp_layer():
         nonlocal cp_base_layer, cp_compare_layer
 
-        for layer in (cp_base_layer, cp_compare_layer):
-            if layer and (layer in m.layers):
+        for layer in list(m.layers):
+            if layer in (cp_base_layer, cp_compare_layer) or hasattr(layer, "_year"):
                 try:
                     m.remove_layer(layer)
                 except Exception:
@@ -1890,6 +1900,7 @@ def Page():
         if cp_subproduct == target:
             return
         _clear_popups()
+        _refresh_cp_layer() 
         loading_product_ref.current = PRODUCT_CENTER_PIVOT
         set_loading_message("Data Loading ...")
         _request_fit(PRODUCT_CENTER_PIVOT)
@@ -2487,29 +2498,52 @@ def Page():
         [field_density_layer, field_density_opacity],
     )
 
-    cpf_change_raster_path = (
-        getattr(CFG, "cpf_change_expanding_raster")
+    cpf_change_tiles_dir = (
+        getattr(CFG, "cpf_change_expanding_tiles_dir")
         if cp_change_variant == CP_CHANGE_EXPANDING
-        else getattr(CFG, "cpf_change_contraction_raster")
+        else getattr(CFG, "cpf_change_contraction_tiles_dir")
     )
+
+    cpf_change_url_base = (
+        getattr(CFG, "cpf_change_tile_public_base_url", CFG.cpf_change_tile_base_url)
+        if force_gcs
+        else getattr(CFG, "cpf_change_tile_base_url")
+    )
+
+    cpf_change_url_base = (
+        f"{cpf_change_url_base.rstrip('/')}/"
+        f"{'expanding' if cp_change_variant == CP_CHANGE_EXPANDING else 'contraction'}"
+    )
+
     cpf_change_layer_name = (
         str(getattr(CFG, "cpf_change_expanding_layer_name", "CPF Expanding Dynamic"))
         if cp_change_variant == CP_CHANGE_EXPANDING
         else str(getattr(CFG, "cpf_change_contraction_layer_name", "CPF Contraction Dynamic"))
     )
+
     cpf_change_layer_obj, cpf_change_bounds, cpf_change_error = solara.use_memo(
         lambda: build_cpf_change_layer(
-            cpf_change_raster_path,
+            cpf_change_tiles_dir,
             layer_name=cpf_change_layer_name,
             opacity=cp_change_opacity,
+            url_base=cpf_change_url_base,
         )
         if (
             active_product == PRODUCT_CENTER_PIVOT
             and cp_subproduct == CP_SUBPRODUCT_CHANGE_DETECTION
             and cp_change_variant is not None
         )
-        else (None, None, None)
+        else (None, None, None),
+        [
+            active_product,
+            cp_subproduct,
+            cp_change_variant,
+            cp_change_opacity,
+            force_gcs,
+        ],
     )
+    
+    
 
     def _render_cpf_change_layer():
         layer_names = {
@@ -3017,22 +3051,6 @@ def Page():
 
     # Markers / popups
     def on_show_timeseries(props: dict):
-        #try:
-        #    csv_path = resolve_csv_path(props)
-        #    df = read_timeseries(csv_path)
-        #    title = f"Sensor time series — {props.get('name') or props.get('sensor_id') or props.get('id') or csv_path.stem}"
-        #    set_ts_df(df); set_ts_title(title)
-        #    show_toast(f"Loaded {csv_path}", "success")
-        #    return build_plotly_widget(df, title)
-        #except Exception as e:
-        #    set_ts_df(None); set_ts_title("")
-        #    show_toast(str(e), "error")
-        #    return W.HTML(f"<pre>{e}</pre>")
-        
-        """
-        Build a Plotly widget for the clicked sensor and show it ONLY in the popup.
-        No more bottom-of-map time series panel.
-        """
         try:
             csv_path = resolve_csv_path(props)
             df = read_timeseries(csv_path)
@@ -3040,8 +3058,13 @@ def Page():
                 f"Sensor time series — "
                 f"{props.get('name') or props.get('sensor_id') or props.get('id') or csv_path.stem}"
             )
-            # This widget is rendered inside the popup by show_popup()
-            return build_plotly_widget(df, title)
+
+            widget = build_plotly_widget(df, title)
+            set_ts_overlay_widget(widget)
+            set_ts_overlay_title(title)
+
+            # Prevent show_popup() from placing the plot below sensor attributes
+            return W.HTML(value="")
         except Exception as e:
             show_toast(str(e), "error")
             return W.HTML(f"<pre>{e}</pre>")
@@ -3189,6 +3212,8 @@ def Page():
                         m.remove_layer(layer)
                     except Exception:
                         pass
+            cp_base_layer = None     
+            cp_compare_layer = None  
             set_cp_base_layer(None)
             set_cp_compare_layer(None)
             return
@@ -3782,6 +3807,37 @@ def Page():
                 """)
 
                 solara.display(m)
+                if ts_overlay_widget is not None:
+                    with solara.Div(
+                        style={
+                            "position": "absolute",
+                            "top": "50%",
+                            "left": "50%",
+                            "transform": "translate(-50%, -50%)",
+                            "zIndex": "2000",
+                            "width": "min(760px, 80vw)",
+                            "maxHeight": "70vh",
+                            "overflow": "auto",
+                            "background": "rgba(255,255,255,0.82)",
+                            "backdropFilter": "blur(8px)",
+                            "border": "1px solid rgba(148,163,184,0.45)",
+                            "borderRadius": "14px",
+                            "boxShadow": "0 18px 45px rgba(15,23,42,0.25)",
+                            "padding": "12px",
+                        }
+                    ):
+                        with solara.Row(
+                            style={
+                                "justifyContent": "space-between",
+                                "alignItems": "center",
+                                "marginBottom": "8px",
+                            }
+                        ):
+                            solara.Markdown(f"**{ts_overlay_title}**")
+                            solara.Button("×", text=True, on_click=lambda: set_ts_overlay_widget(None))
+
+                        solara.display(ts_overlay_widget)
+                        
                 _loading_badge()
 
         Toast(

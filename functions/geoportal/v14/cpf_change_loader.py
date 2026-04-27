@@ -1,107 +1,95 @@
 from __future__ import annotations
 
-import base64
-from functools import lru_cache
-from io import BytesIO
+import math
 from pathlib import Path
 
 import ipyleaflet
-import numpy as np
-import rasterio
-from PIL import Image
-from rasterio.enums import Resampling
-from rasterio.transform import array_bounds
-from rasterio.vrt import WarpedVRT
 
 from functions.geoportal.v14.config import CFG
 from functions.geoportal.v14.cloud_assets import ensure_local_directory
 
 
-def _hex_to_rgba(color: str) -> tuple[int, int, int, int]:
-    value = color.lstrip("#")
-    if len(value) != 6:
-        raise ValueError(f"Invalid RGB color: {color}")
-    return tuple(int(value[index:index + 2], 16) for index in (0, 2, 4)) + (255,)
+def _detect_zoom_range(tiles_folder: Path) -> tuple[int | None, int | None]:
+    try:
+        z_levels = sorted(int(p.name) for p in tiles_folder.iterdir() if p.is_dir() and p.name.isdigit())
+    except FileNotFoundError:
+        return None, None
+    return (z_levels[0], z_levels[-1]) if z_levels else (None, None)
 
 
-def _legend_lookup() -> dict[int, tuple[int, int, int, int]]:
-    return {
-        int(item["value"]): _hex_to_rgba(str(item["color"]))
-        for item in getattr(CFG, "cpf_change_legend", [])
-    }
+def _leaflet_bounds_from_xyz(tiles_folder: Path, z: int) -> list[list[float]] | None:
+    zdir = tiles_folder / str(z)
+    if not zdir.exists():
+        return None
+
+    xs = sorted(int(p.name) for p in zdir.iterdir() if p.is_dir() and p.name.isdigit())
+    if not xs:
+        return None
+
+    ys: list[int] = []
+    for xdir in zdir.iterdir():
+        if xdir.is_dir() and xdir.name.isdigit():
+            ys.extend(int(p.stem) for p in xdir.glob("*.png"))
+
+    if not ys:
+        return None
+
+    x_min, x_max = xs[0], xs[-1]
+    y_min, y_max = min(ys), max(ys)
+
+    def num2lat(y: int, z: int) -> float:
+        n = math.pi - 2.0 * math.pi * y / (2 ** z)
+        return math.degrees(math.atan(math.sinh(n)))
+
+    def num2lon(x: int, z: int) -> float:
+        return x / (2 ** z) * 360.0 - 180.0
+
+    return [
+        [num2lat(y_max + 1, z), num2lon(x_min, z)],
+        [num2lat(y_min, z), num2lon(x_max + 1, z)],
+    ]
 
 
-def _resolve_change_raster(raster_path: Path) -> Path:
-    raster_path = Path(raster_path)
+def _resolve_change_tiles_dir(tiles_dir: Path) -> Path:
+    tiles_dir = Path(tiles_dir)
 
-    if raster_path.exists():
-        return raster_path
+    if tiles_dir.exists():
+        return tiles_dir
 
-    change_dir = ensure_local_directory(
-        Path(getattr(CFG, "cpf_change_dir", raster_path.parent)),
-        suffixes=(".tif", ".tiff"),
+    return ensure_local_directory(
+        tiles_dir,
+        suffixes=(".png",),
     )
-
-    candidate = change_dir / raster_path.name
-    if candidate.exists():
-        return candidate
-
-    raise FileNotFoundError(f"Change-detection raster not found: {raster_path}")
-
-
-@lru_cache(maxsize=2)
-def _build_change_asset(raster_path_str: str) -> tuple[str, list[list[float]]]:
-    raster_path = _resolve_change_raster(Path(raster_path_str))
-
-    with rasterio.open(raster_path) as src:
-        with WarpedVRT(
-            src,
-            crs="EPSG:4326",
-            resampling=Resampling.nearest,
-            nodata=0,
-        ) as vrt:
-            values = vrt.read(1)
-            transform = vrt.transform
-
-    values = np.nan_to_num(values, nan=0, posinf=0, neginf=0).astype(np.int16)
-
-    height, width = values.shape
-    rgba = np.zeros((height, width, 4), dtype=np.uint8)
-
-    for raster_value, rgba_color in _legend_lookup().items():
-        rgba[values == raster_value] = rgba_color
-
-    image = Image.fromarray(rgba, mode="RGBA")
-    buffer = BytesIO()
-    image.save(buffer, format="PNG", optimize=True)
-    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-
-    west, south, east, north = array_bounds(height, width, transform)
-    bounds = [[float(south), float(west)], [float(north), float(east)]]
-
-    return f"data:image/png;base64,{encoded}", bounds
 
 
 def build_cpf_change_layer(
-    raster_path: Path,
+    tiles_dir: Path,
     *,
     layer_name: str,
     opacity: float | None = None,
-) -> tuple[ipyleaflet.ImageOverlay | None, list[list[float]] | None, str | None]:
+    url_base: str | None = None,
+) -> tuple[ipyleaflet.TileLayer | None, list[list[float]] | None, str | None]:
     try:
-        data_url, bounds = _build_change_asset(str(raster_path))
+        tiles_dir = _resolve_change_tiles_dir(Path(tiles_dir))
+        zmin, zmax = _detect_zoom_range(tiles_dir)
+        bounds = _leaflet_bounds_from_xyz(tiles_dir, zmax) if zmax is not None else None
+
+        if url_base is None:
+            url_base = str(tiles_dir)
+
+        layer = ipyleaflet.TileLayer(
+            url=f"{url_base.rstrip('/')}/{{z}}/{{x}}/{{y}}.png",
+            name=layer_name,
+            opacity=float(opacity if opacity is not None else getattr(CFG, "cpf_change_default_opacity", 0.82)),
+            min_zoom=4,
+            max_zoom=13,
+            no_wrap=True,
+            tile_size=256,
+            tms=False,  # XYZ
+            attribution="© CPF change tiles",
+        )
+        setattr(layer, "_bounds", bounds)
+        return layer, bounds, None
+
     except Exception as exc:
         return None, None, str(exc)
-
-    layer = ipyleaflet.ImageOverlay(
-        url=data_url,
-        bounds=bounds,
-        name=layer_name,
-        opacity=float(
-            opacity
-            if opacity is not None
-            else getattr(CFG, "cpf_change_default_opacity", 0.82)
-        ),
-    )
-    setattr(layer, "_bounds", bounds)
-    return layer, bounds, None

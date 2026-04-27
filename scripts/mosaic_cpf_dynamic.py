@@ -180,8 +180,8 @@ def _classify_years(year: np.ndarray, nodata: float | int | None) -> np.ndarray:
     else:
         valid = year != nodata
 
-    classified[(year < 1990) & valid] = 1
-    classified[(year >= 1990) & (year <= 2000) & valid] = 2
+    classified[(year <= 1990) & valid] = 1
+    classified[(year > 1990) & (year <= 2000) & valid] = 2
     classified[(year > 2000) & (year <= 2010) & valid] = 3
     classified[(year > 2010) & (year <= 2020) & valid] = 4
     classified[(year > 2020) & valid] = 5

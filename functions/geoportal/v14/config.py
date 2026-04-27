@@ -145,9 +145,19 @@ class Config:
     center_pivot_layer_name: str = "Center-Pivot Fields"
     center_pivot_years: tuple[int, ...] = (1990,1995,2000,2005,2010,2015,2016,2017,2018,2019,2020,2021,2022,2023,2024)
     center_pivot_default_year: int = 2024
-    cpf_change_dir: Path = APP_SERVER_ROOT / "cpf_dynamic"
-    cpf_change_expanding_raster: Path = APP_SERVER_ROOT / "cpf_dynamic" / "KSA_cpf_expanding_classified.tif"
-    cpf_change_contraction_raster: Path = APP_SERVER_ROOT / "cpf_dynamic" / "KSA_cpf_contraction_classified.tif"
+    
+    cpf_change_tiles_dir: Path = APP_SERVER_ROOT / "cpf_dynamic_tiles"
+    cpf_change_expanding_tiles_dir: Path = APP_SERVER_ROOT / "cpf_dynamic_tiles" / "expanding"
+    cpf_change_contraction_tiles_dir: Path = APP_SERVER_ROOT / "cpf_dynamic_tiles" / "contraction"
+    cpf_change_tile_base_url: str = os.environ.get(
+        "CPF_CHANGE_TILE_BASE_URL",
+        f"{ASSET_BASE_URL}/cpf_dynamic_tiles",
+    )
+    cpf_change_tile_public_base_url: str = os.environ.get(
+        "CPF_CHANGE_TILE_PUBLIC_BASE_URL",
+        f"{PUBLIC_ASSET_BASE_URL}/cpf_dynamic_tiles",
+    )
+    
     cpf_change_expanding_layer_name: str = "CPF Expanding Dynamic"
     cpf_change_contraction_layer_name: str = "CPF Contraction Dynamic"
     cpf_change_default_opacity: float = 0.82
