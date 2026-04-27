@@ -1,20 +1,25 @@
 # functions/geoportal/v14/timeseries.py
 from __future__ import annotations
+
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
+
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import ipywidgets as W
 import solara
+
 from functions.geoportal.v14.config import CFG
 from functions.geoportal.v14.cloud_assets import ensure_local_asset
+
 
 # ------------------------------
 # Depth mapping legend
 # ------------------------------
 DEPTH_LEGENDS = {
-    "A1(5)":  "0–10 cm",
+    "A1(5)": "0–10 cm",
     "A2(15)": "10–20 cm",
     "A3(25)": "20–30 cm",
     "A4(35)": "30–40 cm",
@@ -25,23 +30,41 @@ DEPTH_LEGENDS = {
     "A9(85)": "80–90 cm",
 }
 
+
 # ---- Color palettes (color-blind friendly) ----
 _OKABE_ITO = [
-    "#E69F00", "#56B4E9", "#009E73",
-    "#F0E442", "#0072B2", "#D55E00",
-    "#CC79A7", "#999999",
+    "#E69F00",
+    "#56B4E9",
+    "#009E73",
+    "#F0E442",
+    "#0072B2",
+    "#D55E00",
+    "#CC79A7",
+    "#999999",
 ]
 
 _TOL_BRIGHT = [
-    "#4477AA", "#66CCEE", "#228833",
-    "#CCBB44", "#EE6677", "#AA3377",
-    "#BBBBBB", "#000000", "#332288",
+    "#4477AA",
+    "#66CCEE",
+    "#228833",
+    "#CCBB44",
+    "#EE6677",
+    "#AA3377",
+    "#BBBBBB",
+    "#000000",
+    "#332288",
 ]
 
 _KAARTEN_OVA = [
-    "#0077BB", "#33BBEE", "#009988",
-    "#EE7733", "#CC3311", "#EE3377",
-    "#228833", "#AA4499", "#807A7A",
+    "#0077BB",
+    "#33BBEE",
+    "#009988",
+    "#EE7733",
+    "#CC3311",
+    "#EE3377",
+    "#228833",
+    "#AA4499",
+    "#807A7A",
 ]
 
 _PALETTES = {
@@ -51,11 +74,66 @@ _PALETTES = {
 }
 
 
+# ------------------------------
+# Timeseries parameter resolution
+# ------------------------------
+_DEFAULT_TS = SimpleNamespace(
+    # # Fallback size used only when no explicit height/width is provided.
+    # Plotly is rendered at this stable internal size, then the whole widget is
+    # visually scaled down when the map overlay is narrower. This makes fonts,
+    # ticks, titles, lines, and margins shrink together.
+    base_width=1800,
+    base_height=820,
+    popup_height=800,
+    band_height_px=100,
+    gap_frac=0.0,
+    max_layers=9,
+    reverse_depth=True,
+    show_background_bands=True,
+    palette_name="kaarten_ova",
+    colors=None,
+    # Typography at full/base width. CSS scaling will shrink these visually.
+    font_family="Arial",
+    font_size=14,
+    title_font_size=20,
+    axis_title_font_size=18,
+    tick_font_size=14,
+    annotation_font_size=12,
+    hover_font_size=13,
+    line_width=2,
+    # Soil moisture settings. These are fallbacks if CFG.timeseries lacks them.
+    sm_column="soil_moisture_root_zone",
+    sm_region_thresholds=(10, 20, 30),
+    sm_region_colors=(
+        "rgba(214, 39, 40, 0.25)",
+        "rgba(255, 127, 14, 0.25)",
+        "rgba(44, 160, 44, 0.20)",
+        "rgba(31, 119, 180, 0.18)",
+    ),
+    sm_top_ylim_min=0,
+    sm_top_min_ceiling=40,
+    sm_top_ylim_pad=5,
+    band_fill_rgba_even="rgba(148, 163, 184, 0.12)",
+    band_fill_rgba_odd="rgba(226, 232, 240, 0.30)",
+)
+
+
+def _ts_param(name: str) -> Any:
+    ts = getattr(CFG, "timeseries", None)
+    if ts is not None and hasattr(ts, name):
+        return getattr(ts, name)
+    if hasattr(_DEFAULT_TS, name):
+        return getattr(_DEFAULT_TS, name)
+    raise AttributeError(
+        f"timeseries param '{name}' missing on both CFG.timeseries and _DEFAULT_TS"
+    )
+
+
 def _resolve_palette(n: int) -> list[str]:
     cfg_colors = _ts_param("colors")
     if isinstance(cfg_colors, (list, tuple)) and len(cfg_colors) > 0:
         return [cfg_colors[i % len(cfg_colors)] for i in range(n)]
-    name = getattr(CFG.timeseries, "palette_name", "kaarten_ova")
+    name = _ts_param("palette_name")
     pal = _PALETTES.get(name, _KAARTEN_OVA)
     return [pal[i % len(pal)] for i in range(n)]
 
@@ -64,12 +142,14 @@ def _resolve_palette(n: int) -> list[str]:
 # CSV resolver and reader
 # ------------------------------
 def resolve_csv_path(props: dict) -> Path:
-    """Choose CSV path based on popup props (id or sensor_id)."""
+    """Choose CSV path based on popup props: csv_path, sensor_id, or id."""
     if "csv_path" in props and props["csv_path"]:
         return ensure_local_asset(Path(str(props["csv_path"])))
+
     sensor_id = props.get("sensor_id") or props.get("id")
     if not sensor_id:
         raise FileNotFoundError("No 'csv_path' or 'sensor_id'/'id' in properties.")
+
     return ensure_local_asset(CFG.sensor_csv_dir / f"{sensor_id}.csv")
 
 
@@ -82,11 +162,14 @@ def read_timeseries(csv_path: Path) -> pd.DataFrame:
 
     time_col = None
     for cand in getattr(
-        CFG, "time_col_candidates", ("Date Time", "Datetime", "Timestamp", "Date", "date")
+        CFG,
+        "time_col_candidates",
+        ("Date Time", "Datetime", "Timestamp", "Date", "date"),
     ):
         if cand in df.columns:
             time_col = cand
             break
+
     if not time_col:
         raise ValueError(f"No datetime column found in {csv_path}")
 
@@ -96,6 +179,7 @@ def read_timeseries(csv_path: Path) -> pd.DataFrame:
     num = df.select_dtypes("number")
     if num.empty:
         raise ValueError(f"No numeric columns in {csv_path}")
+
     return num
 
 
@@ -118,359 +202,158 @@ def _ensure_percent(series: pd.Series) -> pd.Series:
     return s
 
 
-# ------------------------------
-# Timeseries parameter resolution (single source of truth)
-# ------------------------------
-_DEFAULT_TS = SimpleNamespace(
-    width=1800,
-    band_height_px=100,
-    gap_frac=0.0,
-    max_layers=9,
-    reverse_depth=True,
-    show_background_bands=True,
-    # Typography fallbacks
-    font_family="Arial",
-    font_size=14,
-    title_font_size=20,
-    # NEW: safe default
-    line_width=2,
-)
-
-
-def _ts_param(name: str):
-    ts = getattr(CFG, "timeseries", None)
-    if ts is not None and hasattr(ts, name):
-        return getattr(ts, name)
-    if hasattr(_DEFAULT_TS, name):
-        return getattr(_DEFAULT_TS, name)
-    raise AttributeError(f"timeseries param '{name}' missing on both CFG.timeseries and _DEFAULT_TS")
+def _selected_depth_columns(num_df: pd.DataFrame) -> list[str]:
+    cols_all = [c for c in num_df.columns if isinstance(c, str)]
+    cols = [c for c in cols_all if c.startswith("A")] or cols_all
+    max_layers = int(_ts_param("max_layers"))
+    return cols[:max_layers] if len(cols) > max_layers else cols
 
 
 # ------------------------------
-# Common layout helpers
+# Common layout helper
 # ------------------------------
 def _apply_common_layout_dual(
     fig: go.Figure,
     *,
     title: str,
-    width: int | None,
-    height: int | None,
-    band_height_px: int,
+    width: int,
+    height: int,
     gap_frac: float,
     labels_bottom: list[str],
-):
+) -> None:
     n = len(labels_bottom) if labels_bottom else 1
-    if height is None:
-        # Two rows: top (soil moisture) + bottom (stacked)
-        height = max(720, int(n * band_height_px + 200))
-
+    height = max(540, int(height))
     font_family = _ts_param("font_family")
-    font_size = _ts_param("font_size")
-    title_font_size = _ts_param("title_font_size")
+    font_size = int(_ts_param("font_size"))
+    title_font_size = int(_ts_param("title_font_size"))
+    axis_title_font_size = int(_ts_param("axis_title_font_size"))
+    tick_font_size = int(_ts_param("tick_font_size"))
+    hover_font_size = int(_ts_param("hover_font_size"))
 
     fig.update_layout(
-        title=title,
-        autosize=(width is None),
-        width=width,
+        title=None,
+        autosize=True,
+        width=None,
         height=height,
-        margin=dict(l=70, r=30, t=90, b=70),
+        margin=dict(l=110, r=30, t=40, b=150),
         showlegend=False,
         hovermode="x unified",
         transition_duration=0,
         font=dict(family=font_family, size=font_size),
         title_font=dict(size=title_font_size),
+        hoverlabel=dict(font_size=hover_font_size, font_family=font_family),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
     )
 
-    # x-axis (shared) — keep grid ON for bottom subplot only
     fig.update_xaxes(
-        row=2, col=1,
-        type="date",
-        tickformat="%Y-%m-%d %H",
-        showgrid=True,
-        title_text="Time",
-        title_font=dict(size=title_font_size),
-        tickfont=dict(size=font_size),
-    )
+            row=2,
+            col=1,
+            type="date",
+            tickformat="%Y-%m-%d",
+            tickformatstops=[
+                dict(dtickrange=[None, None], value="%Y-%m-%d")
+            ],
+            showgrid=True,
+            title_text="Time",
+            title_font=dict(size=axis_title_font_size),
+            tickfont=dict(size=tick_font_size),
+            automargin=True,
+        )
 
-    # y-axis for TOP (root zone %) — grid OFF handled per-axes in plotting block
     fig.update_yaxes(
-        row=1, col=1,
+        row=1,
+        col=1,
         title_text="Soil moisture (root zone, %)",
-        title_font=dict(size=title_font_size),
-        tickfont=dict(size=font_size),
+        title_font=dict(size=axis_title_font_size),
+        tickfont=dict(size=tick_font_size),
         rangemode="tozero",
         zeroline=False,
+        title_standoff=40,
     )
 
-    # y-axis for BOTTOM (stacked normalized)
     tick_positions = [i * (1 + gap_frac) + 0.5 for i in range(n)]
     fig.update_yaxes(
-        row=2, col=1,
+        row=2,
+        col=1,
         tickmode="array",
         tickvals=tick_positions,
-        ticktext=labels_bottom or [f"Layer {i+1}" for i in range(n)],
+        ticktext=labels_bottom or [f"Layer {i + 1}" for i in range(n)],
         showgrid=False,
         title_text="Soil moisture (per depth layer, %)",
-        title_font=dict(size=title_font_size),
-        tickfont=dict(size=font_size),
+        title_font=dict(size=axis_title_font_size),
+        tickfont=dict(size=tick_font_size),
         zeroline=False,
+        title_standoff=40,
     )
 
 
 # ------------------------------
-# Solara component (Leaflet bottom-of-page figure)
+# Main figure builder
 # ------------------------------
-@solara.component
-def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series"):
+def build_timeseries_figure(
+    df: pd.DataFrame,
+    title: str = "Soil moisture time series",
+    *,
+    width: int | None = None,
+    height: int | None = None,
+) -> go.Figure:
+    """Build the fixed-size Plotly figure used by the CSS-scaled wrapper."""
     if df is None or df.empty:
-        with solara.Alert("No data to plot.", type="warning"):
-            return
+        raise ValueError("No data to plot.")
 
     num_df = df.select_dtypes("number")
-    cols_all = [c for c in num_df.columns if isinstance(c, str)]
-    # Prefer depth bands (A*) on bottom subplot; fallback to all numerics
-    cols = [c for c in cols_all if c.startswith("A")] or cols_all
-
-    max_layers = _ts_param("max_layers")
-    cols = cols[:max_layers] if len(cols) > max_layers else cols
+    cols = _selected_depth_columns(num_df)
     if not cols:
-        with solara.Alert("No numeric columns available for plotting.", type="warning"):
-            return
+        raise ValueError("No numeric columns available for plotting.")
 
-    # X
-    x = pd.to_datetime(num_df.index, errors="coerce")
-    x_str = _to_time_strings(x)
-
-    # Labels for stacked bands
-    labels = [DEPTH_LEGENDS.get(c, c) for c in cols]
-
-    gap_frac = _ts_param("gap_frac")
-    band_height_px = _ts_param("band_height_px")
-    manual_width = _ts_param("width")
-    reverse_depth = _ts_param("reverse_depth")
-    show_bands = _ts_param("show_background_bands")
-    line_width = _ts_param("line_width")
-
-    # NEW: read top-subplot config
-    sm_column = _ts_param("sm_column")
-    t0, t1, t2 = _ts_param("sm_region_thresholds")
-    c_warn, c_stress, c_normal, c_sat = _ts_param("sm_region_colors")
-    sm_min = _ts_param("sm_top_ylim_min")
-    sm_min_ceiling = _ts_param("sm_top_min_ceiling")
-    sm_pad = _ts_param("sm_top_ylim_pad")
-
-    # Reverse depth (so 0–10 cm on top)
-    if reverse_depth:
-        cols = list(reversed(cols))
-        labels = list(reversed(labels))
-
-    # --- Build subplots: row1=soil moisture, row2=stacked bands ---
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.08,
-        row_heights=[0.9, 1.6],  # top ~smaller, bottom larger
-    )
-
-    # ---------- TOP subplot: soil_moisture_root_zone with y-bands ----------
-    if sm_column in num_df.columns:
-        sm = _ensure_percent(num_df[sm_column])
-        # Define y-limit to make top band visible even if data < t2
-        ymax = float(max(sm_min_ceiling, (sm.max(skipna=True) or 0) + sm_pad))
-        ymin = float(sm_min)
-
-        # Region bands (use yref='y1', xref='x1')
-        if len(x_str) >= 2:
-            x0, x1 = x_str[0], x_str[-1]
-            region_shapes = [
-                dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=0,   y1=t0, fillcolor=c_warn,   line=dict(width=0), layer="below", opacity=0.35),
-                dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t0,  y1=t1, fillcolor=c_stress, line=dict(width=0), layer="below", opacity=0.35),
-                dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t1,  y1=t2, fillcolor=c_normal, line=dict(width=0), layer="below", opacity=0.35),
-                dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t2,  y1=ymax, fillcolor=c_sat,  line=dict(width=0), layer="below", opacity=0.35),
-            ]
-            fig.update_layout(shapes=region_shapes)
-
-        fig.add_scatter(
-            x=x_str,
-            y=sm,
-            mode="lines",
-            name="Soil Moisture (Root Zone)",
-            line=dict(width=line_width, color="#4477AA"),
-            hovertemplate="Time: %{x}<br>SM root zone: %{y:.2f}%<extra></extra>",
-            row=1, col=1,
-        )
-        fig.update_yaxes(range=[ymin, ymax], row=1, col=1)
-
-        # Turn OFF grid for the top subplot
-        fig.update_yaxes(showgrid=False, row=1, col=1)
-        fig.update_xaxes(showgrid=True, row=1, col=1)
-
-        # Threshold lines
-        for thr, dash in [(t0, "dot"), (t1, "dot"), (t2, "dash")]:
-            fig.add_hline(y=thr, line_width=1, line_dash=dash, line_color="#555", row=1, col=1)
-
-        # Annotations just ABOVE each lower threshold line: 0, t0, t1, t2
-        labels_top = ["Warning", "Stress", "Refill", "Full"]  # bottom → top
-        y_lines = [ymin, t0, t1, t2]
-        dy = max(0.5, 0.02 * (ymax - ymin))  # small vertical offset
-        for txt, yline in zip(labels_top, y_lines):
-            fig.add_annotation(
-                xref="paper", x=0.01,  # near left margin of the subplot
-                yref="y1", y=yline + dy,
-                text=txt,
-                showarrow=False,
-                font=dict(size=12, color="#333"),
-                align="left",
-            )
-
-    # ---------- BOTTOM subplot: stacked depth bands (normalized) ----------
-    colors = _resolve_palette(len(cols))
-    band_even = _ts_param("band_fill_rgba_even")
-    band_odd = _ts_param("band_fill_rgba_odd")
-
-    if show_bands and len(x_str) >= 2:
-        x0, x1 = x_str[0], x_str[-1]
-        zebra = []
-        for i, _ in enumerate(cols):
-            y0 = i * (1 + gap_frac)
-            y1 = y0 + 1
-            fill = band_even if i % 2 == 0 else band_odd
-            zebra.append(
-                dict(
-                    type="rect", xref="x2", yref="y2",
-                    x0=x0, x1=x1, y0=y0, y1=y1,
-                    fillcolor=fill, line=dict(width=0), layer="below",
-                )
-            )
-        # keep existing region shapes for top; extend with zebra for bottom
-        cur_shapes = list(fig.layout.shapes) if fig.layout.shapes else []
-        fig.update_layout(shapes=tuple(cur_shapes + zebra))
-
-    for i, c in enumerate(cols):
-        y_raw = num_df[c].astype("float64")
-        ymin = float(y_raw.min(skipna=True))
-        ymax = float(y_raw.max(skipna=True))
-        rng = ymax - ymin if pd.notnull(ymax) and pd.notnull(ymin) else 0.0
-        if rng <= 0 or not pd.notnull(rng):
-            y_norm = pd.Series(0.5, index=y_raw.index)
-        else:
-            y_norm = (y_raw - ymin) / rng
-
-        offset = i * (1 + gap_frac)
-        y_stack = (y_norm + offset)
-
-        fig.add_scattergl(
-            x=x_str,
-            y=y_stack,
-            mode="lines",
-            name=labels[i],
-            customdata=y_raw.to_numpy(),
-            hovertemplate=(
-                f"<b>{labels[i]}</b><br>"
-                "Time: %{x}<br>"
-                "Value: %{customdata:.3f}%<extra></extra>"
-            ),
-            line=dict(width=line_width, color=colors[i]),
-            row=2, col=1,
-        )
-
-    _apply_common_layout_dual(
-        fig,
-        title=title,
-        width=manual_width,
-        height=None,
-        band_height_px=band_height_px,
-        gap_frac=gap_frac,
-        labels_bottom=labels,
-    )
-
-    solara.Style(
-        """
-    .timeseries-stacked {
-        overflow-x: auto;
-        overflow-y: auto;
-    }
-    """
-    )
-
-    with solara.Div(classes=["timeseries-stacked"]):
-        return solara.FigurePlotly(fig)
-
-
-# ------------------------------
-# Popup widget (ipywidgets)
-# ------------------------------
-# ------------------------------
-# Popup widget (ipywidgets)
-# ------------------------------
-def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
-    """
-    Build the sensor time series for use INSIDE a popup (no bottom panel).
-    """
-    if df is None or df.empty:
-        return W.HTML("<i>No data to plot.</i>")
-
-    num_df = df.select_dtypes("number")
-    cols_all = [c for c in num_df.columns if isinstance(c, str)]
-    cols = [c for c in cols_all if c.startswith("A")] or cols_all
-    if not cols:
-        return W.HTML("<i>No numeric columns available for plotting.</i>")
-
-    # X-axis as nice time strings (avoids 1e18-style ticks)
     x = pd.to_datetime(num_df.index, errors="coerce")
     x_str = _to_time_strings(x, fmt="%Y-%m-%d %H:%M")
 
     labels = [DEPTH_LEGENDS.get(c, c) for c in cols]
 
-    # 👉 Popup-friendly but BIGGER size
-    manual_width = 1800          # was 1100
-    popup_height = 800           # was 650
+    gap_frac = float(_ts_param("gap_frac"))
+    reverse_depth = bool(_ts_param("reverse_depth"))
+    show_bands = bool(_ts_param("show_background_bands"))
+    line_width = float(_ts_param("line_width"))
+    annotation_font_size = int(_ts_param("annotation_font_size"))
 
-    gap_frac = _ts_param("gap_frac")
-    band_height_px = _ts_param("band_height_px")
-    reverse_depth = _ts_param("reverse_depth")
-    show_bands = _ts_param("show_background_bands")
-    line_width = _ts_param("line_width")
-
-    # Read config for top subplot & zebra
     sm_column = _ts_param("sm_column")
     t0, t1, t2 = _ts_param("sm_region_thresholds")
     c_warn, c_stress, c_normal, c_sat = _ts_param("sm_region_colors")
-    sm_min = _ts_param("sm_top_ylim_min")
-    sm_min_ceiling = _ts_param("sm_top_min_ceiling")
-    sm_pad = _ts_param("sm_top_ylim_pad")
+    sm_min = float(_ts_param("sm_top_ylim_min"))
+    sm_min_ceiling = float(_ts_param("sm_top_min_ceiling"))
+    sm_pad = float(_ts_param("sm_top_ylim_pad"))
     band_even = _ts_param("band_fill_rgba_even")
-    band_odd  = _ts_param("band_fill_rgba_odd")
+    band_odd = _ts_param("band_fill_rgba_odd")
 
     if reverse_depth:
         cols = list(reversed(cols))
         labels = list(reversed(labels))
 
-    # FigureWidget + subplots
-    base_fig = make_subplots(
+    fig = make_subplots(
         rows=2,
         cols=1,
         shared_xaxes=True,
         vertical_spacing=0.08,
         row_heights=[0.9, 1.6],
     )
-    fig = go.FigureWidget(base_fig)
 
-    # ---------- TOP subplot ----------
+    # ---------- TOP subplot: root-zone soil moisture ----------
     if sm_column in num_df.columns:
         sm = _ensure_percent(num_df[sm_column])
         ymax = float(max(sm_min_ceiling, (sm.max(skipna=True) or 0) + sm_pad))
-        ymin = float(sm_min)
+        ymin = sm_min
 
         if len(x_str) >= 2:
             x0, x1 = x_str[0], x_str[-1]
             region_shapes = [
-                dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=0,  y1=t0, fillcolor=c_warn,   line=dict(width=0), layer="below", opacity=0.35),
+                dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=0, y1=t0, fillcolor=c_warn, line=dict(width=0), layer="below", opacity=0.35),
                 dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t0, y1=t1, fillcolor=c_stress, line=dict(width=0), layer="below", opacity=0.35),
                 dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t1, y1=t2, fillcolor=c_normal, line=dict(width=0), layer="below", opacity=0.35),
-                dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t2, y1=ymax, fillcolor=c_sat,  line=dict(width=0), layer="below", opacity=0.35),
+                dict(type="rect", xref="x1", yref="y1", x0=x0, x1=x1, y0=t2, y1=ymax, fillcolor=c_sat, line=dict(width=0), layer="below", opacity=0.35),
             ]
-            fig.layout.shapes = tuple(region_shapes)
+            fig.update_layout(shapes=region_shapes)
 
         fig.add_scatter(
             x=x_str,
@@ -483,28 +366,37 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
             col=1,
         )
         fig.update_yaxes(range=[ymin, ymax], row=1, col=1)
-
         fig.update_yaxes(showgrid=False, row=1, col=1)
         fig.update_xaxes(showgrid=False, row=1, col=1)
 
         for thr, dash in [(t0, "dot"), (t1, "dot"), (t2, "dash")]:
-            fig.add_hline(y=thr, line_width=1, line_dash=dash, line_color="#555", row=1, col=1)
+            fig.add_hline(
+                y=thr,
+                line_width=1,
+                line_dash=dash,
+                line_color="#555",
+                row=1,
+                col=1,
+            )
 
         labels_top = ["Warning", "Stress", "Refill", "Full"]
         y_lines = [ymin, t0, t1, t2]
         dy = max(0.5, 0.02 * (ymax - ymin))
         for txt, yline in zip(labels_top, y_lines):
             fig.add_annotation(
-                xref="paper", x=0.01,
-                yref="y1", y=yline + dy,
+                xref="paper",
+                x=0.01,
+                yref="y1",
+                y=yline + dy,
                 text=txt,
                 showarrow=False,
-                font=dict(size=12, color="#333"),
+                font=dict(size=annotation_font_size, color="#333"),
                 align="left",
             )
 
-    # ---------- BOTTOM subplot ----------
+    # ---------- BOTTOM subplot: stacked depth bands ----------
     colors = _resolve_palette(len(cols))
+
     if show_bands and len(x_str) >= 2:
         x0, x1 = x_str[0], x_str[-1]
         zebra = []
@@ -514,24 +406,36 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
             fill = band_even if i % 2 == 0 else band_odd
             zebra.append(
                 dict(
-                    type="rect", xref="x2", yref="y2",
-                    x0=x0, x1=x1, y0=y0, y1=y1,
-                    fillcolor=fill, line=dict(width=0), layer="below",
+                    type="rect",
+                    xref="x2",
+                    yref="y2",
+                    x0=x0,
+                    x1=x1,
+                    y0=y0,
+                    y1=y1,
+                    fillcolor=fill,
+                    line=dict(width=0),
+                    layer="below",
                 )
             )
         cur_shapes = list(fig.layout.shapes) if fig.layout.shapes else []
-        fig.layout.shapes = tuple(cur_shapes + zebra)
+        fig.update_layout(shapes=tuple(cur_shapes + zebra))
 
     for i, c in enumerate(cols):
         y_raw = pd.Series(num_df[c].astype("float64"), index=num_df.index)
-        ymin, ymax = y_raw.min(skipna=True), y_raw.max(skipna=True)
+        ymin = y_raw.min(skipna=True)
+        ymax = y_raw.max(skipna=True)
         rng = (ymax - ymin) if pd.notnull(ymax) and pd.notnull(ymin) else 0.0
-        y_norm = ((y_raw - ymin) / rng).fillna(0.5) if rng > 0 else pd.Series(0.5, index=y_raw.index)
+        y_norm = (
+            ((y_raw - ymin) / rng).fillna(0.5)
+            if rng > 0
+            else pd.Series(0.5, index=y_raw.index)
+        )
 
         offset = i * (1 + gap_frac)
         y_stack = (y_norm + offset).to_numpy()
 
-        fig.add_scatter(
+        fig.add_scattergl(
             x=x_str,
             y=y_stack,
             mode="lines",
@@ -548,7 +452,6 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
             col=1,
         )
 
-    # Make sure all stacked bands are visible
     max_band_top = (len(cols) - 1) * (1 + gap_frac) + 1
     fig.update_yaxes(
         row=2,
@@ -558,35 +461,116 @@ def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
         zeroline=False,
     )
 
-    # Layout: use larger height for popup
     _apply_common_layout_dual(
         fig,
         title=title,
-        width=manual_width,
-        height=popup_height,
-        band_height_px=band_height_px,
+        width=int(width if width is not None else _ts_param("base_width")),
+        height=int(height if height is not None else _ts_param("base_height")),
         gap_frac=gap_frac,
         labels_bottom=labels,
     )
 
-    fig.update_layout(
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+    fig.update_xaxes(row=2, col=1, tickangle=0,automargin=True,)
+    return fig
+
+
+# ------------------------------
+# Solara component, optional bottom-of-page figure
+# ------------------------------
+@solara.component
+def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series"):
+    if df is None or df.empty:
+        with solara.Alert("No data to plot.", type="warning"):
+            return
+
+    try:
+        fig = build_timeseries_figure(df, title)
+    except Exception as exc:
+        with solara.Alert(str(exc), type="warning"):
+            return
+
+    solara.FigurePlotly(fig)
+
+
+# ------------------------------
+# Popup / map-overlay widget
+# ------------------------------
+def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
+    """
+    Build the sensor time-series Plotly widget for the map overlay.
+
+    This intentionally uses CSS scaling instead of Plotly autosize because Plotly
+    does not automatically shrink fonts/ticks/titles with container width.
+    The figure is rendered at base_width x base_height, then scaled to fit the
+    available overlay width while preserving the full chart.
+    """
+    if df is None or df.empty:
+        return W.HTML("<i>No data to plot.</i>")
+
+    base_width = int(_ts_param("base_width"))
+    base_height = int(_ts_param("base_height"))
+
+    fig = build_timeseries_figure(
+        df,
+        title,
+        width=base_width,
+        height=base_height,
     )
 
-    fig.update_xaxes(
-        row=2,
-        col=1,
-        tickangle=-45,
-    )
+    plot = go.FigureWidget(fig)
+    plot.layout.autosize = False
+    plot.layout.width = base_width
+    plot.layout.height = base_height
 
-    # 👉 Make the widget itself large in the popup, with scroll if needed
-    return W.Box(
-        [fig],
+    css = W.HTML(
+        value=f"""
+        <style>
+        .timeseries-scale-shell {{
+            width: 100%;
+            max-width: 100%;
+            overflow: hidden;
+            padding: 0;
+            margin: 0;
+        }}
+
+        .timeseries-scale-inner {{
+            width: {base_width}px;
+            height: {base_height}px;
+            transform-origin: top left;
+            transform: scale(var(--ts-scale, 1));
+        }}
+
+        .timeseries-scale-inner .js-plotly-plot,
+        .timeseries-scale-inner .plot-container,
+        .timeseries-scale-inner .svg-container {{
+            width: {base_width}px !important;
+            height: {base_height}px !important;
+        }}
+        </style>
+        """
+    )
+    inner = W.Box(
+        [plot],
         layout=W.Layout(
-            width=f"{manual_width}px",     # match manual_width
-            height="820px",     # a bit larger than figure height
-            overflow_x="auto",
-            overflow_y="auto",
+            width=f"{base_width}px",
+            height=f"{base_height}px",
+            overflow="hidden",
+            padding="0",
+            margin="0",
         ),
     )
+    inner.add_class("timeseries-scale-inner")
+
+    outer = W.Box(
+        [css, inner],
+        layout=W.Layout(
+            width="100%",
+            max_width="100%",
+            overflow="hidden",
+            padding="0",
+            margin="0",
+        ),
+    )
+    outer.add_class("timeseries-scale-shell")
+
+    return outer

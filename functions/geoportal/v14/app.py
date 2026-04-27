@@ -62,7 +62,7 @@ from functions.geoportal.v14.layers import (
 from functions.geoportal.v14.widgets import use_debounce
 from functions.geoportal.v14.errors import Toast, use_toast
 from functions.geoportal.v14.geojson_loader import load_icon_group_from_geojson
-from functions.geoportal.v14.timeseries import resolve_csv_path, read_timeseries, build_plotly_widget
+from functions.geoportal.v14.timeseries import resolve_csv_path, read_timeseries, build_timeseries_figure
 from functions.geoportal.v14.center_pivot_loader import build_center_pivot_layer
 from shapely.geometry import mapping, box
 
@@ -788,11 +788,9 @@ def Page():
     fetch_debug_tick, set_fetch_debug_tick = solara.use_state(0)
     debounced_geojson = use_debounce(geojson_path, delay_ms=500)
     refs = ReactiveRefs()
-    ts_overlay_widget, set_ts_overlay_widget = solara.use_state(None)
+    ts_overlay_fig, set_ts_overlay_fig = solara.use_state(None)
     ts_overlay_title, set_ts_overlay_title = solara.use_state("")
-    ## turn off the below two line if not showing as page at the bottom of the map window
-    #ts_title, set_ts_title = solara.use_state("")
-    #ts_df, set_ts_df = solara.use_state(None)
+    
 
     default_tiles_dir = str(getattr(CFG, "default_tiles_dir", _APP_SERVER_ROOT / "38RLQ_2024"))
     raster_dir, set_raster_dir = solara.use_state(default_tiles_dir)
@@ -1753,7 +1751,7 @@ def Page():
         set_click_point(None)
         set_hover_point(None)
         set_hover_field_record(None)
-        set_ts_overlay_widget(None)
+        set_ts_overlay_fig(None)
         set_ts_overlay_title("")
         for attr in ("_datepalms_highlight_layer", "_cpf_highlight_layer"):
             try:
@@ -3059,8 +3057,8 @@ def Page():
                 f"{props.get('name') or props.get('sensor_id') or props.get('id') or csv_path.stem}"
             )
 
-            widget = build_plotly_widget(df, title)
-            set_ts_overlay_widget(widget)
+            fig = build_timeseries_figure(df, title, width=None, height=720)
+            set_ts_overlay_fig(fig)
             set_ts_overlay_title(title)
 
             # Prevent show_popup() from placing the plot below sensor attributes
@@ -3804,23 +3802,31 @@ def Page():
                     .leaflet-popup.tree-health-top-center-popup .leaflet-popup-content {
                         margin: 0 !important;
                     }
+                    .timeseries-overlay-plot,
+                    .timeseries-overlay-plot .js-plotly-plot,
+                    .timeseries-overlay-plot .plot-container,
+                    .timeseries-overlay-plot .svg-container {
+                        width: 100% !important;
+                        max-width: 100% !important;
+                    }
                 """)
 
                 solara.display(m)
-                if ts_overlay_widget is not None:
+                if ts_overlay_fig is not None:
                     with solara.Div(
                         style={
                             "position": "absolute",
                             "top": "50%",
-                            "left": "50%",
-                            "transform": "translate(-50%, -50%)",
+                            "left": "5%",
+                            "right": "5%",
+                            "transform": "translateY(-50%)",
                             "zIndex": "2000",
-                            "width": "min(760px, 80vw)",
+                            "width": "auto",
                             "maxHeight": "70vh",
-                            "overflow": "auto",
-                            "background": "rgba(255,255,255,0.82)",
-                            "backdropFilter": "blur(8px)",
-                            "border": "1px solid rgba(148,163,184,0.45)",
+                            "overflow": "hidden",
+                            "background": "rgba(255,255,255,0.4)",
+                            "backdropFilter": "blur(2px)",
+                            "border": "1px solid rgba(148,163,184,0.4)",
                             "borderRadius": "14px",
                             "boxShadow": "0 18px 45px rgba(15,23,42,0.25)",
                             "padding": "12px",
@@ -3834,10 +3840,47 @@ def Page():
                             }
                         ):
                             solara.Markdown(f"**{ts_overlay_title}**")
-                            solara.Button("×", text=True, on_click=lambda: set_ts_overlay_widget(None))
+                            solara.Button("×", text=True, on_click=lambda: set_ts_overlay_fig(None))
 
-                        solara.display(ts_overlay_widget)
-                        
+                        with solara.Div(
+                            classes=["timeseries-overlay-plot"],
+                            style={"width": "100%", "minWidth": "0", "height": "100%"},
+                        ):
+                            solara.FigurePlotly(ts_overlay_fig)
+                            solara.HTML(
+                                tag="script",
+                                unsafe_innerHTML="""
+                                setTimeout(() => {
+                                    const resizePlots = () => {
+                                        const plots = document.querySelectorAll(".timeseries-overlay-plot .js-plotly-plot");
+                                        plots.forEach((plot) => {
+                                            if (window.Plotly) {
+                                                window.Plotly.Plots.resize(plot);
+                                            }
+                                        });
+                                    };
+
+                                    resizePlots();
+
+                                    if (!window.__timeseriesPlotResizeObserverAttached) {
+                                        window.__timeseriesPlotResizeObserverAttached = true;
+
+                                        window.addEventListener("resize", () => {
+                                            setTimeout(resizePlots, 100);
+                                        });
+
+                                        const target = document.querySelector(".timeseries-overlay-plot");
+                                        if (target && window.ResizeObserver) {
+                                            const observer = new ResizeObserver(() => {
+                                                setTimeout(resizePlots, 100);
+                                            });
+                                            observer.observe(target);
+                                        }
+                                    }
+                                }, 150);
+                                """
+                            )
+                                                        
                 _loading_badge()
 
         Toast(
