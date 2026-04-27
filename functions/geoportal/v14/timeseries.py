@@ -31,7 +31,9 @@ DEPTH_LEGENDS = {
 }
 
 
-# ---- Color palettes (color-blind friendly) ----
+# ------------------------------
+# Color palettes, color-blind friendly
+# ------------------------------
 _OKABE_ITO = [
     "#E69F00",
     "#56B4E9",
@@ -78,21 +80,16 @@ _PALETTES = {
 # Timeseries parameter resolution
 # ------------------------------
 _DEFAULT_TS = SimpleNamespace(
-    # # Fallback size used only when no explicit height/width is provided.
-    # Plotly is rendered at this stable internal size, then the whole widget is
-    # visually scaled down when the map overlay is narrower. This makes fonts,
-    # ticks, titles, lines, and margins shrink together.
-    base_width=1800,
+    # Used when callers do not pass an explicit height.
     base_height=820,
-    popup_height=800,
-    band_height_px=100,
+    min_height=540,
     gap_frac=0.0,
     max_layers=9,
     reverse_depth=True,
     show_background_bands=True,
     palette_name="kaarten_ova",
     colors=None,
-    # Typography at full/base width. CSS scaling will shrink these visually.
+    # Typography. Override in CFG.timeseries if needed.
     font_family="Arial",
     font_size=14,
     title_font_size=20,
@@ -133,6 +130,7 @@ def _resolve_palette(n: int) -> list[str]:
     cfg_colors = _ts_param("colors")
     if isinstance(cfg_colors, (list, tuple)) and len(cfg_colors) > 0:
         return [cfg_colors[i % len(cfg_colors)] for i in range(n)]
+
     name = _ts_param("palette_name")
     pal = _PALETTES.get(name, _KAARTEN_OVA)
     return [pal[i % len(pal)] for i in range(n)]
@@ -190,12 +188,13 @@ def _to_time_strings(index_like, fmt: str = "%Y-%m-%d %H:%M:%S") -> pd.Index:
     """Convert an index/array-like of datetimes to strings for Plotly."""
     if isinstance(index_like, pd.DatetimeIndex):
         return index_like.strftime(fmt)
+
     ser = pd.to_datetime(index_like, errors="coerce")
     return pd.Series(ser).dt.strftime(fmt).to_numpy()
 
 
 def _ensure_percent(series: pd.Series) -> pd.Series:
-    """If values look like 0–1, convert to %, else pass-through."""
+    """If values look like 0-1, convert to %, else pass through."""
     s = pd.to_numeric(series, errors="coerce")
     if s.dropna().max() is not None and s.dropna().max() <= 1.00001:
         return s * 100.0
@@ -215,17 +214,15 @@ def _selected_depth_columns(num_df: pd.DataFrame) -> list[str]:
 def _apply_common_layout_dual(
     fig: go.Figure,
     *,
-    title: str,
-    width: int,
     height: int,
     gap_frac: float,
     labels_bottom: list[str],
 ) -> None:
     n = len(labels_bottom) if labels_bottom else 1
-    height = max(540, int(height))
+    height = max(int(_ts_param("min_height")), int(height))
+
     font_family = _ts_param("font_family")
     font_size = int(_ts_param("font_size"))
-    title_font_size = int(_ts_param("title_font_size"))
     axis_title_font_size = int(_ts_param("axis_title_font_size"))
     tick_font_size = int(_ts_param("tick_font_size"))
     hover_font_size = int(_ts_param("hover_font_size"))
@@ -235,41 +232,40 @@ def _apply_common_layout_dual(
         autosize=True,
         width=None,
         height=height,
-        margin=dict(l=110, r=30, t=40, b=150),
+        margin=dict(l=120, r=30, t=40, b=150),
         showlegend=False,
         hovermode="x unified",
         transition_duration=0,
         font=dict(family=font_family, size=font_size),
-        title_font=dict(size=title_font_size),
         hoverlabel=dict(font_size=hover_font_size, font_family=font_family),
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
     )
 
     fig.update_xaxes(
-            row=2,
-            col=1,
-            type="date",
-            tickformat="%Y-%m-%d",
-            tickformatstops=[
-                dict(dtickrange=[None, None], value="%Y-%m-%d")
-            ],
-            showgrid=True,
-            title_text="Time",
-            title_font=dict(size=axis_title_font_size),
-            tickfont=dict(size=tick_font_size),
-            automargin=True,
-        )
+        row=2,
+        col=1,
+        type="date",
+        tickformat="%Y-%m-%d",
+        tickformatstops=[dict(dtickrange=[None, None], value="%Y-%m-%d")],
+        showgrid=True,
+        title_text="Time",
+        title_font=dict(size=axis_title_font_size),
+        tickfont=dict(size=tick_font_size),
+        tickangle=0,
+        automargin=True,
+    )
 
+    # Remove native y-axis titles. They shift because the two panels have
+    # different tick-label widths. Fixed paper annotations below keep the two
+    # y-labels aligned to the same position relative to the plot area.
     fig.update_yaxes(
         row=1,
         col=1,
-        title_text="Soil moisture (root zone, %)",
-        title_font=dict(size=axis_title_font_size),
+        title_text=None,
         tickfont=dict(size=tick_font_size),
         rangemode="tozero",
         zeroline=False,
-        title_standoff=40,
     )
 
     tick_positions = [i * (1 + gap_frac) + 0.5 for i in range(n)]
@@ -280,11 +276,39 @@ def _apply_common_layout_dual(
         tickvals=tick_positions,
         ticktext=labels_bottom or [f"Layer {i + 1}" for i in range(n)],
         showgrid=False,
-        title_text="Soil moisture (per depth layer, %)",
-        title_font=dict(size=axis_title_font_size),
+        title_text=None,
         tickfont=dict(size=tick_font_size),
         zeroline=False,
-        title_standoff=40,
+    )
+
+    top_domain = fig.layout.yaxis.domain
+    bottom_domain = fig.layout.yaxis2.domain
+    y_label_x = -0.2 # control the ylabel axis location 
+
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=y_label_x,
+        y=(top_domain[0] + top_domain[1]) / 2,
+        text="Soil moisture (root zone, %)",
+        showarrow=False,
+        textangle=-90,
+        font=dict(size=axis_title_font_size, family=font_family),
+        xanchor="center",
+        yanchor="middle",
+    )
+
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=y_label_x,
+        y=(bottom_domain[0] + bottom_domain[1]) / 2,
+        text="Soil moisture (per depth layer, %)",
+        showarrow=False,
+        textangle=-90,
+        font=dict(size=axis_title_font_size, family=font_family),
+        xanchor="center",
+        yanchor="middle",
     )
 
 
@@ -298,7 +322,7 @@ def build_timeseries_figure(
     width: int | None = None,
     height: int | None = None,
 ) -> go.Figure:
-    """Build the fixed-size Plotly figure used by the CSS-scaled wrapper."""
+    """Build a responsive Plotly figure for Solara FigurePlotly."""
     if df is None or df.empty:
         raise ValueError("No data to plot.")
 
@@ -463,14 +487,11 @@ def build_timeseries_figure(
 
     _apply_common_layout_dual(
         fig,
-        title=title,
-        width=int(width if width is not None else _ts_param("base_width")),
         height=int(height if height is not None else _ts_param("base_height")),
         gap_frac=gap_frac,
         labels_bottom=labels,
     )
 
-    fig.update_xaxes(row=2, col=1, tickangle=0,automargin=True,)
     return fig
 
 
@@ -493,84 +514,18 @@ def TimeSeriesFigure(df: pd.DataFrame, title: str = "Soil moisture time series")
 
 
 # ------------------------------
-# Popup / map-overlay widget
+# Backward-compatible wrapper for older callers
 # ------------------------------
 def build_plotly_widget(df: pd.DataFrame, title: str) -> W.Widget:
     """
-    Build the sensor time-series Plotly widget for the map overlay.
+    Deprecated compatibility wrapper.
 
-    This intentionally uses CSS scaling instead of Plotly autosize because Plotly
-    does not automatically shrink fonts/ticks/titles with container width.
-    The figure is rendered at base_width x base_height, then scaled to fit the
-    available overlay width while preserving the full chart.
+    Current app.py should call build_timeseries_figure(...) and render the result
+    with solara.FigurePlotly(...). This wrapper remains only so older imports do
+    not fail.
     """
     if df is None or df.empty:
         return W.HTML("<i>No data to plot.</i>")
 
-    base_width = int(_ts_param("base_width"))
-    base_height = int(_ts_param("base_height"))
-
-    fig = build_timeseries_figure(
-        df,
-        title,
-        width=base_width,
-        height=base_height,
-    )
-
-    plot = go.FigureWidget(fig)
-    plot.layout.autosize = False
-    plot.layout.width = base_width
-    plot.layout.height = base_height
-
-    css = W.HTML(
-        value=f"""
-        <style>
-        .timeseries-scale-shell {{
-            width: 100%;
-            max-width: 100%;
-            overflow: hidden;
-            padding: 0;
-            margin: 0;
-        }}
-
-        .timeseries-scale-inner {{
-            width: {base_width}px;
-            height: {base_height}px;
-            transform-origin: top left;
-            transform: scale(var(--ts-scale, 1));
-        }}
-
-        .timeseries-scale-inner .js-plotly-plot,
-        .timeseries-scale-inner .plot-container,
-        .timeseries-scale-inner .svg-container {{
-            width: {base_width}px !important;
-            height: {base_height}px !important;
-        }}
-        </style>
-        """
-    )
-    inner = W.Box(
-        [plot],
-        layout=W.Layout(
-            width=f"{base_width}px",
-            height=f"{base_height}px",
-            overflow="hidden",
-            padding="0",
-            margin="0",
-        ),
-    )
-    inner.add_class("timeseries-scale-inner")
-
-    outer = W.Box(
-        [css, inner],
-        layout=W.Layout(
-            width="100%",
-            max_width="100%",
-            overflow="hidden",
-            padding="0",
-            margin="0",
-        ),
-    )
-    outer.add_class("timeseries-scale-shell")
-
-    return outer
+    fig = build_timeseries_figure(df, title)
+    return go.FigureWidget(fig)
