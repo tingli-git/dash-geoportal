@@ -71,6 +71,7 @@ from functions.geoportal.v14.ksa_bounds_loader import build_ksa_bounds_layer
 from functions.geoportal.v14.tree_health_loader import build_tree_health_layer, clear_tree_health_highlight
 from functions.geoportal.v14.datepalm_province_loader import list_date_palm_provinces
 from functions.geoportal.v14.field_density_loader import build_field_density_layer
+from functions.geoportal.v14.cpf_change_loader import build_cpf_change_layer
 from functions.geoportal.v14.lookup import FieldLookup
 from functions.geoportal.v14.popups import show_popup, show_date_palm_field_province_badge, clear_tree_health_badge, clear_sensor_badges
 from functions.geoportal.v14.utils import html_table_popup
@@ -228,6 +229,11 @@ PRODUCT_DEFAULT_ZOOM = {
     PRODUCT_FIELD_DENSITY: 6,
     PRODUCT_TREE_VEGE: 9,
 }
+
+CP_SUBPRODUCT_YEARLY_MASKS = "yearly_masks"
+CP_SUBPRODUCT_CHANGE_DETECTION = "change_detection"
+CP_CHANGE_EXPANDING = "expanding"
+CP_CHANGE_CONTRACTION = "contraction"
 
 
 # -------------------------
@@ -513,6 +519,34 @@ def _center_pivot_legend_widget(base_year, compare_year=None, compare_enabled=Fa
     return panel
 
 
+def _cpf_change_legend_widget(change_variant: str):
+    rows = []
+    for item in getattr(CFG, "cpf_change_legend", []):
+        color = str(item.get("color", "#000000"))
+        label = str(item.get("label", ""))
+        rows.append(
+            (
+                "<div style='display:flex;align-items:center;gap:8px;margin-top:6px;'>"
+                f"<span style='width:16px;height:16px;border-radius:4px;border:1px solid rgba(15,23,42,0.18);background:{color};display:inline-block;'></span>"
+                f"<span style='fontSize: var(--font-small);color:#0f172a;'>{label}</span>"
+                "</div>"
+            )
+        )
+
+    title = str(getattr(CFG, "cpf_change_legend_title", "Center-Pivot change detection"))
+    subtitle = "Expanding dynamic" if change_variant == CP_CHANGE_EXPANDING else "Contraction dynamic"
+    html = (
+        "<div style='margin-top:1px;background:rgba(255,255,255,0.4);backdrop-filter: blur(6px);border:1px solid rgba(148,163,184,0.4);"
+        "border-radius:12px;box-shadow:0 10px 28px rgba(15,23,42,0.14);padding:12px 14px;min-width:210px;display:inline-block;'>"
+        f"<div style='fontSize: var(--font-section-title);font-weight:700;color:#0f172a;line-height:1.35;'>{title}</div>"
+        f"<div style='font-size:var(--font-small);font-weight:600;color:#475569;margin-top:4px;'>{subtitle}</div>"
+        f"{''.join(rows)}</div>"
+    )
+    panel = W.Box([W.HTML(value=html)], layout=W.Layout(padding="0", margin="0"))
+    panel.add_class("center-pivot-legend-panel")
+    return panel
+
+
 # field density legend
 
 def _field_density_legend_widget() -> W.HTML:
@@ -588,7 +622,7 @@ def _product_legend(product: str):
         )
     if product == PRODUCT_CENTER_PIVOT:
         return solara.Markdown(
-            "Center-Pivot Fields — yearly polygons rendered from the CPF archive.",
+            "Center-Pivot Fields — yearly field masks and change-detection rasters.",
             style={"fontSize": "var(--font-body)", "color": "#444", "marginTop": "0.5rem"},
         )
     if product == PRODUCT_SENSORS:
@@ -791,10 +825,16 @@ def Page():
 
     cp_use_http, set_cp_use_http = solara.use_state(True)
     cp_clip_roi_enabled, set_cp_clip_roi_enabled = solara.use_state(True)
+    cp_subproduct, set_cp_subproduct = solara.use_state(CP_SUBPRODUCT_YEARLY_MASKS)
+    cp_change_variant, set_cp_change_variant = solara.use_state(None)
+    cp_change_opacity, set_cp_change_opacity = solara.use_state(
+        float(getattr(CFG, "cpf_change_default_opacity", 0.82))
+    )
 
     # Layers
     cp_base_layer, set_cp_base_layer = solara.use_state(None)
     cp_compare_layer, set_cp_compare_layer = solara.use_state(None)
+    cp_change_layer, set_cp_change_layer = solara.use_state(None)
 
     # 🔧 TEMP FIX: keep compatibility with old code
     cp_layer = cp_base_layer
@@ -1331,18 +1371,24 @@ def Page():
         if active_product != PRODUCT_CENTER_PIVOT:
             return
 
-        base_year = year_index_map.get(cp_year_index, years[-1])
-        compare_year = year_index_map.get(cp_compare_year_index, years[-1])
-
-        control = ipyleaflet.WidgetControl(
-            widget=_center_pivot_legend_widget(
-                base_year=base_year,
-                compare_year=compare_year,
-                compare_enabled=cp_compare_enabled,
-            ),
-            position="topright",
-            transparent_bg=True,
-        )
+        if cp_subproduct == CP_SUBPRODUCT_YEARLY_MASKS:
+            base_year = year_index_map.get(cp_year_index, years[-1])
+            compare_year = year_index_map.get(cp_compare_year_index, years[-1])
+            control = ipyleaflet.WidgetControl(
+                widget=_center_pivot_legend_widget(
+                    base_year=base_year,
+                    compare_year=compare_year,
+                    compare_enabled=cp_compare_enabled,
+                ),
+                position="topright",
+                transparent_bg=True,
+            )
+        else:
+            control = ipyleaflet.WidgetControl(
+                widget=_cpf_change_legend_widget(cp_change_variant),
+                position="topright",
+                transparent_bg=True,
+            )
 
         try:
             m.add_control(control)
@@ -1358,6 +1404,8 @@ def Page():
             cp_year_index,
             cp_compare_year_index,
             cp_compare_enabled,
+            cp_subproduct,
+            cp_change_variant,
         ],
     )
 
@@ -1838,6 +1886,84 @@ def Page():
 
     NATIONAL_COVERAGE_HA = 192_041.41
 
+    def _activate_center_pivot_subproduct(target: str):
+        if cp_subproduct == target:
+            return
+        _clear_popups()
+        loading_product_ref.current = PRODUCT_CENTER_PIVOT
+        set_loading_message("Data Loading ...")
+        _request_fit(PRODUCT_CENTER_PIVOT)
+        set_cp_subproduct(target)
+
+    def _activate_cpf_change_variant(target: str):
+        if cp_change_variant == target:
+            return
+        _clear_popups()
+        loading_product_ref.current = PRODUCT_CENTER_PIVOT
+        set_loading_message("Data Loading ...")
+        _request_fit(PRODUCT_CENTER_PIVOT)
+        set_cp_change_variant(target)
+
+    def _render_center_pivot_subproduct_buttons():
+        buttons = []
+        for product, label in (
+            (CP_SUBPRODUCT_YEARLY_MASKS, "Yearly Field Masks"),
+            (CP_SUBPRODUCT_CHANGE_DETECTION, "Change Detection"),
+        ):
+            is_active = cp_subproduct == product
+            buttons.append(
+                solara.Button(
+                    label,
+                    text=True,
+                    on_click=lambda _event=None, target=product: _activate_center_pivot_subproduct(target),
+                    style={
+                        "padding": "0.35rem 0.8rem",
+                        "borderRadius": "999px",
+                        "border": "1px solid #cbd5f5",
+                        "background": "#0f766e" if is_active else "#f8fafc",
+                        "color": "#f8fafc" if is_active else "#0f172a",
+                        "fontWeight": "600",
+                        "fontSize": "var(--font-button)",
+                        "margin": "0",
+                    },
+                )
+            )
+        return solara.Row(
+            children=buttons,
+            gap="0.45rem",
+            style={"alignItems": "center", "flexWrap": "wrap", "marginBottom": "0.85rem"},
+        )
+
+    def _render_cpf_change_buttons():
+        buttons = []
+        for variant, label in (
+            (CP_CHANGE_EXPANDING, "Expanding dynamic"),
+            (CP_CHANGE_CONTRACTION, "Contraction dynamic"),
+        ):
+            is_active = cp_change_variant == variant
+            buttons.append(
+                solara.Button(
+                    label,
+                    text=True,
+                    on_click=lambda _event=None, target=variant: _activate_cpf_change_variant(target),
+                    style={
+                        "padding": "0.35rem 0.8rem",
+                        "borderRadius": "999px",
+                        "border": "1px solid #cbd5f5",
+                        "background": "#0f766e" if is_active else "#f8fafc",
+                        "color": "#f8fafc" if is_active else "#0f172a",
+                        "fontWeight": "600",
+                        "fontSize": "var(--font-button)",
+                        "margin": "0",
+                    },
+                )
+            )
+        return solara.Row(
+            children=buttons,
+            gap="0.45rem",
+            style={"alignItems": "center", "flexWrap": "wrap", "marginBottom": "0.35rem"},
+        )
+
     def _render_date_palm_subproduct_buttons():
         buttons = []
         for product, label in (
@@ -2127,80 +2253,117 @@ def Page():
                 ],
             )
         if product == PRODUCT_CENTER_PIVOT:
-            return solara.Column(
-                gap="0.75rem",
-                style={"width": "100%"},
-                children=[
-                    solara.Markdown(
-                        "Base year",
-                        style={
-                            "fontSize": "var(--font-section-title)",
-                            "fontWeight": "700",
-                            "margin": "0",
-                        },
-                    ),
-                    _render_cp_year_buttons(cp_year_index, _on_cp_year_change),
-
-                    solara.Div(
-                        style={"width": "260px"},
-                        children=[
-                            _slider_float(
-                                "Base opacity",
-                                cp_base_opacity,
-                                set_cp_base_opacity,
-                                0.05,
-                                1.0,
-                                0.05,
-                                width="260px",
-                            ),
-                        ],
-                    ),
-
-                    solara.Switch(
-                        label="Compare with another year",
-                        value=cp_compare_enabled,
-                        on_value=set_cp_compare_enabled,
-                    ),
-
-                    solara.Div(
-                        style={
-                            "display": "block" if cp_compare_enabled else "none",
-                            "width": "100%",
-                        },
-                        children=[
-                            solara.Markdown(
-                                "Comparison year",
-                                style={
-                                    "fontSize": "var(--font-section-title)",
-                                    "fontWeight": "700",
-                                    "margin": "0 0 0.25rem 0",
-                                },
-                            ),
-                            _render_cp_year_buttons(
-                                cp_compare_year_index,
-                                lambda value: (
-                                    _refresh_cp_layer(),
-                                    set_cp_compare_year_index(value),
+            children = [
+                solara.Markdown(
+                    "Subproduct",
+                    style={
+                        "marginBottom": "0.3rem",
+                        "fontSize": "var(--font-section-title)",
+                        "fontWeight": "800",
+                        "color": "#424345",
+                    },
+                ),
+                _render_center_pivot_subproduct_buttons(),
+            ]
+            if cp_subproduct == CP_SUBPRODUCT_YEARLY_MASKS:
+                children.extend(
+                    [
+                        solara.Markdown(
+                            "Base year",
+                            style={
+                                "fontSize": "var(--font-section-title)",
+                                "fontWeight": "700",
+                                "margin": "0",
+                            },
+                        ),
+                        _render_cp_year_buttons(cp_year_index, _on_cp_year_change),
+                        solara.Div(
+                            style={"width": "260px"},
+                            children=[
+                                _slider_float(
+                                    "Base opacity",
+                                    cp_base_opacity,
+                                    set_cp_base_opacity,
+                                    0.05,
+                                    1.0,
+                                    0.05,
+                                    width="260px",
                                 ),
-                            ),
-                            solara.Div(
-                                style={"width": "260px", "marginTop": "0.5rem"},
-                                children=[
-                                    _slider_float(
-                                        "Comparison opacity",
-                                        cp_compare_opacity,
-                                        set_cp_compare_opacity,
-                                        0.05,
-                                        1.0,
-                                        0.05,
-                                        width="260px",
+                            ],
+                        ),
+                        solara.Switch(
+                            label="Compare with another year",
+                            value=cp_compare_enabled,
+                            on_value=set_cp_compare_enabled,
+                        ),
+                        solara.Div(
+                            style={
+                                "display": "block" if cp_compare_enabled else "none",
+                                "width": "100%",
+                            },
+                            children=[
+                                solara.Markdown(
+                                    "Comparison year",
+                                    style={
+                                        "fontSize": "var(--font-section-title)",
+                                        "fontWeight": "700",
+                                        "margin": "0 0 0.25rem 0",
+                                    },
+                                ),
+                                _render_cp_year_buttons(
+                                    cp_compare_year_index,
+                                    lambda value: (
+                                        _refresh_cp_layer(),
+                                        set_cp_compare_year_index(value),
                                     ),
-                                ],
-                            ),
-                        ],
-                    ),
-                ],
-            )
+                                ),
+                                solara.Div(
+                                    style={"width": "260px", "marginTop": "0.5rem"},
+                                    children=[
+                                        _slider_float(
+                                            "Comparison opacity",
+                                            cp_compare_opacity,
+                                            set_cp_compare_opacity,
+                                            0.05,
+                                            1.0,
+                                            0.05,
+                                            width="260px",
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
+                    ]
+                )
+            else:
+                children.extend(
+                    [
+                        solara.Markdown(
+                            "Change layer",
+                            style={
+                                "fontSize": "var(--font-section-title)",
+                                "fontWeight": "700",
+                                "margin": "0",
+                            },
+                        ),
+                        _render_cpf_change_buttons(),
+                        solara.Div(
+                            style={"width": "260px"},
+                            children=[
+                                _slider_float(
+                                    "Opacity",
+                                    cp_change_opacity,
+                                    set_cp_change_opacity,
+                                    0.05,
+                                    1.0,
+                                    0.05,
+                                    width="260px",
+                                ),
+                            ],
+                        ),
+                    ]
+                )
+            return solara.Column(gap="0.75rem", style={"width": "100%"}, children=children)
         return solara.Div()
 
     # React to tiles folder changes (used for ext, bounds, fit)
@@ -2322,6 +2485,65 @@ def Page():
     solara.use_effect(
         lambda: (field_density_layer and set_layer_opacity(field_density_layer, field_density_opacity)),
         [field_density_layer, field_density_opacity],
+    )
+
+    cpf_change_raster_path = (
+        getattr(CFG, "cpf_change_expanding_raster")
+        if cp_change_variant == CP_CHANGE_EXPANDING
+        else getattr(CFG, "cpf_change_contraction_raster")
+    )
+    cpf_change_layer_name = (
+        str(getattr(CFG, "cpf_change_expanding_layer_name", "CPF Expanding Dynamic"))
+        if cp_change_variant == CP_CHANGE_EXPANDING
+        else str(getattr(CFG, "cpf_change_contraction_layer_name", "CPF Contraction Dynamic"))
+    )
+    cpf_change_layer_obj, cpf_change_bounds, cpf_change_error = solara.use_memo(
+        lambda: build_cpf_change_layer(
+            cpf_change_raster_path,
+            layer_name=cpf_change_layer_name,
+            opacity=cp_change_opacity,
+        )
+        if (
+            active_product == PRODUCT_CENTER_PIVOT
+            and cp_subproduct == CP_SUBPRODUCT_CHANGE_DETECTION
+            and cp_change_variant is not None
+        )
+        else (None, None, None)
+    )
+
+    def _render_cpf_change_layer():
+        layer_names = {
+            str(getattr(CFG, "cpf_change_expanding_layer_name", "CPF Expanding Dynamic")),
+            str(getattr(CFG, "cpf_change_contraction_layer_name", "CPF Contraction Dynamic")),
+        }
+        if active_product == PRODUCT_CENTER_PIVOT and cp_subproduct == CP_SUBPRODUCT_CHANGE_DETECTION:
+            if cpf_change_error:
+                show_toast(cpf_change_error, "error")
+                return
+            if cpf_change_layer_obj is None:
+                return
+            upsert_overlay_by_name(m, cpf_change_layer_obj, below_markers=True)
+            set_cp_change_layer(cpf_change_layer_obj)
+            _maybe_fit_product(PRODUCT_CENTER_PIVOT, cpf_change_bounds)
+            _finish_loading(PRODUCT_CENTER_PIVOT)
+            return
+
+        for layer in list(m.layers):
+            if getattr(layer, "name", "") not in layer_names:
+                continue
+            try:
+                m.remove_layer(layer)
+            except Exception:
+                pass
+        set_cp_change_layer(None)
+
+    solara.use_effect(
+        _render_cpf_change_layer,
+        [m, active_product, cp_subproduct, cpf_change_layer_obj, cpf_change_bounds, cpf_change_error],
+    )
+    solara.use_effect(
+        lambda: (cpf_change_layer_obj and set_layer_opacity(cpf_change_layer_obj, cp_change_opacity)),
+        [cpf_change_layer_obj, cp_change_opacity],
     )
 
     def _build_tile_layer(province: str, style_config: dict[str, str]) -> ipyleaflet.VectorTileLayer:
@@ -2960,13 +3182,15 @@ def Page():
     def _ensure_cp_layer():
         nonlocal cp_base_layer, cp_compare_layer
 
-        if active_product != PRODUCT_CENTER_PIVOT:
+        if active_product != PRODUCT_CENTER_PIVOT or cp_subproduct != CP_SUBPRODUCT_YEARLY_MASKS:
             for layer in (cp_base_layer, cp_compare_layer):
                 if layer and layer in m.layers:
                     try:
                         m.remove_layer(layer)
                     except Exception:
                         pass
+            set_cp_base_layer(None)
+            set_cp_compare_layer(None)
             return
 
         base_year = year_index_map.get(cp_year_index, years[-1])
@@ -3019,6 +3243,7 @@ def Page():
             cp_compare_opacity,
             cp_use_http,
             cp_clip_roi_enabled,
+            cp_subproduct,
             raster_layer,
         ],
     )
