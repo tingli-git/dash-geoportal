@@ -455,6 +455,65 @@ def _tree_health_legend_widget():
     panel.add_class("tree-health-legend-panel")
     return panel
 
+# center-pivot legend
+def _center_pivot_legend_widget(base_year, compare_year=None, compare_enabled=False):
+    base_color = "#4daf4a"
+    compare_color = "#e41a1c"
+
+    rows = f"""
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+            <span style="width:16px;height:16px;border-radius:999px;
+                         border:1px solid rgba(15,23,42,0.18);
+                         background:{base_color};display:inline-block;"></span>
+            <span style="font-size:var(--font-body);color:#0f172a;">
+                Base year: {base_year}
+            </span>
+        </div>
+    """
+
+    if compare_enabled and compare_year is not None:
+        rows += f"""
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+                <span style="width:16px;height:16px;border-radius:999px;
+                             border:1px solid rgba(15,23,42,0.18);
+                             background:{compare_color};display:inline-block;"></span>
+                <span style="font-size:var(--font-body);color:#0f172a;">
+                    Comparison year: {compare_year}
+                </span>
+            </div>
+        """
+
+    html = f"""
+    <div style="
+        margin-top: 0px;
+        background: rgba(255,255,255,0.40);
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(148,163,184,0.4);
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(15,23,42,0.12);
+        padding: 12px 14px;
+        min-width: 210px;
+        display: inline-block;
+    ">
+        <div style="font-size:var(--font-section-title);
+                    font-weight:700;
+                    color:#0f172a;
+                    line-height:1.35;">
+            Center-Pivot Fields
+        </div>
+        {rows}
+    </div>
+    """
+
+    panel = W.Box(
+        [W.HTML(value=html)],
+        layout=W.Layout(padding="0", margin="0")
+    )
+    panel.add_class("center-pivot-legend-panel")
+    return panel
+
+
+# field density legend
 
 def _field_density_legend_widget() -> W.HTML:
     rows = []
@@ -787,6 +846,8 @@ def Page():
     loading_product_ref = solara.use_ref(None)
     active_product_ref = solara.use_ref(None)
     default_national_applied_ref = solara.use_ref(False)
+    center_pivot_legend_control_ref = solara.use_ref(None)
+    
     if not authenticated:
         _LoginGate(lambda: set_authenticated(True), session_id)
         return
@@ -1256,6 +1317,49 @@ def Page():
             print("[TREE LEGEND] add failed:", e)
 
     solara.use_effect(_sync_tree_health_legend, [m, active_product])
+    
+    # sync for center-pivot 
+    def _sync_center_pivot_legend():
+        current = center_pivot_legend_control_ref.current
+        if current is not None:
+            try:
+                m.remove_control(current)
+            except Exception:
+                pass
+            center_pivot_legend_control_ref.current = None
+
+        if active_product != PRODUCT_CENTER_PIVOT:
+            return
+
+        base_year = year_index_map.get(cp_year_index, years[-1])
+        compare_year = year_index_map.get(cp_compare_year_index, years[-1])
+
+        control = ipyleaflet.WidgetControl(
+            widget=_center_pivot_legend_widget(
+                base_year=base_year,
+                compare_year=compare_year,
+                compare_enabled=cp_compare_enabled,
+            ),
+            position="topright",
+            transparent_bg=True,
+        )
+
+        try:
+            m.add_control(control)
+            center_pivot_legend_control_ref.current = control
+        except Exception:
+            pass
+
+    solara.use_effect(
+        _sync_center_pivot_legend,
+        [
+            m,
+            active_product,
+            cp_year_index,
+            cp_compare_year_index,
+            cp_compare_enabled,
+        ],
+    )
 
     def _sync_national_figure():
         current = national_figure_control_ref.current
