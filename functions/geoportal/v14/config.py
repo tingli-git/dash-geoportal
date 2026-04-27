@@ -33,6 +33,7 @@ class Config:
     auth_password: str = os.environ.get("GEOPORTAL_AUTH_PASSWORD", "").strip()
     default_geojson: Path = APP_SERVER_ROOT / "Aldka" / "SensorInfos" / "AldakaSensors.geojson"
     map_center: tuple[float, float] = (24.0, 45.0)
+    sensors_default_center: tuple[float, float] = (25.879276, 44.914727)
     map_zoom: int = 6
     map_height: str = "90vh"
     map_width: str = "100%"

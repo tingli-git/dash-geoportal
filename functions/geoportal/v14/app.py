@@ -935,7 +935,7 @@ def Page():
     def _sync_force_gcs():
         set_force_gcs(force_gcs)
 
-    solara.use_effect(_sync_force_gcs, [force_gcs])
+    solara.use_effect(_sync_force_gcs, [force_gcs])  # noqa: SH101
 
     def _refresh_fetch_debug():
         set_fetch_debug_tick(lambda current: current + 1)
@@ -1631,6 +1631,8 @@ def Page():
         try:
             if product == PRODUCT_TREE_HEALTH:
                 center = getattr(CFG, "tree_health_default_center", None)
+                if center is None:
+                    center = (28.469913, 34.936269)  # fallback from your actual loaded layer center
                 zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_TREE_HEALTH, 16)
                 if center:
                     m.center = center
@@ -1641,8 +1643,9 @@ def Page():
             if product == PRODUCT_SENSORS:
                 center = getattr(CFG, "sensors_default_center", None)
                 zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_SENSORS, 16)
+
                 if center:
-                    m.center = center
+                    m.center = tuple(center)
                 if zoom:
                     m.zoom = zoom
                 return
@@ -1715,15 +1718,14 @@ def Page():
         if not bounds:
             return
 
-        if product == PRODUCT_TREE_HEALTH:
-            center = _center_from_bounds(bounds)
-            target_zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_TREE_HEALTH, 14)
-            if center is not None:
-                m.center = center
-            if target_zoom is not None:
-                m.zoom = target_zoom
-        else:
-            _fit_bounds(bounds)
+        center = _center_from_bounds(bounds)
+        target_zoom = PRODUCT_DEFAULT_ZOOM.get(product)
+
+        if center is not None:
+            m.center = center
+
+        if target_zoom is not None:
+            m.zoom = target_zoom
 
         pending_fit_product.current = None
         product_switching_ref.current = False
@@ -1974,7 +1976,14 @@ def Page():
         _clear_popups()
         loading_product_ref.current = PRODUCT_CENTER_PIVOT
         set_loading_message("Data Loading ...")
-        _request_fit(PRODUCT_CENTER_PIVOT)
+
+        bounds = _roi_to_bounds(getattr(CFG, "center_pivot_default_roi", None))
+        center = _center_from_bounds(bounds)
+        if center:
+            m.center = center
+        m.zoom = 6
+        pending_fit_product.current = None
+
         set_cp_change_variant(target)
 
     def _render_center_pivot_subproduct_buttons():
@@ -2620,7 +2629,15 @@ def Page():
                 return
             upsert_overlay_by_name(m, cpf_change_layer_obj, below_markers=True)
             set_cp_change_layer(cpf_change_layer_obj)
-            _maybe_fit_product(PRODUCT_CENTER_PIVOT, cpf_change_bounds)
+
+            # Keep CPF change detection fixed at default zoom.
+            bounds = _roi_to_bounds(getattr(CFG, "center_pivot_default_roi", None))
+            center = _center_from_bounds(bounds)
+            if center:
+                m.center = center
+            m.zoom = 6
+
+            pending_fit_product.current = None
             _finish_loading(PRODUCT_CENTER_PIVOT)
             return
 
@@ -3170,7 +3187,17 @@ def Page():
 
         if icon_group not in m.layers:
             m.add_layer(icon_group)
-        _maybe_fit_product(PRODUCT_SENSORS, bounds)
+
+        # Keep Soil Moisture fixed at configured default view.
+        center = getattr(CFG, "sensors_default_center", None)
+        zoom = PRODUCT_DEFAULT_ZOOM.get(PRODUCT_SENSORS, 16)
+
+        if center:
+            m.center = center
+        if zoom:
+            m.zoom = zoom
+
+        pending_fit_product.current = None
         _finish_loading(PRODUCT_SENSORS)
 
         try:
@@ -3539,7 +3566,13 @@ def Page():
         loading_product_ref.current = product
         set_loading_message("Data Loading ...")
 
-        if product != PRODUCT_DATEPALM_FIELDS:
+        # Do not auto-fit products that should keep fixed default view.
+        if product not in {
+            PRODUCT_DATEPALM_FIELDS,
+            
+            PRODUCT_CENTER_PIVOT,
+            PRODUCT_TREE_HEALTH,
+        }:
             _request_fit(product)
 
         set_active_product(product)
