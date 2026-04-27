@@ -1047,37 +1047,63 @@ def Page():
                 event = args[0]
             else:
                 event = kwargs
+
             if active_product != PRODUCT_DATEPALM_FIELDS:
                 return
             if not event:
                 return
+
             event_type = event.get("type")
+
+            # Clear badges only for real map navigation.
+            if event_type in {"zoomend", "moveend", "dragend"}:
+                _clear_popups()
+                set_click_point(None)
+                set_hover_point(None)
+                return
+
+            # Do NOT clear badges for layer/layout changes.
+            # These can happen when browser width/height changes or layers re-render.
             if event_type in {
-                "moveend",
-                "zoomend",
-                "dragend",
                 "overlayadd",
                 "overlayremove",
                 "baselayerchange",
                 "layeradd",
                 "layerremove",
             }:
-                _clear_popups()
-                set_click_point(None)
                 set_hover_point(None)
                 return
+
             if event_type not in {"click", "mousemove", "mouseover", "mouseout"}:
                 return
+
             coords = event.get("coordinates")
+
             if event_type == "mouseout":
                 set_hover_point(None)
                 return
+
             if not coords or len(coords) < 2:
                 return
+
             lat, lon = coords[0], coords[1]
             point = (float(lat), float(lon))
+
             if event_type == "click":
+                # Empty-map click should clear existing badges.
+                record = None
+                if field_lookup is not None:
+                    try:
+                        record = field_lookup.lookup(float(lon), float(lat))
+                    except Exception:
+                        record = None
+
+                if not record:
+                    _clear_popups()
+                    return
+
                 set_click_point(point)
+
             elif event_type in {"mousemove", "mouseover"}:
                 if hover_point != point:
                     set_hover_point(point)
@@ -1088,7 +1114,7 @@ def Page():
         except Exception:
             pass
 
-    solara.use_effect(_attach_field_click, [m, active_product])
+    solara.use_effect(_attach_field_click, [m, active_product, field_lookup, hover_point])
 
     def _lookup_field_info():
         if active_product != PRODUCT_DATEPALM_FIELDS:
@@ -1855,16 +1881,34 @@ def Page():
                 return
             if change.new is None or change.old is None:
                 return
-            if tuple(change.new) != tuple(change.old):
-                _clear_popups()
+
+            try:
+                old_lat, old_lon = float(change.old[0]), float(change.old[1])
+                new_lat, new_lon = float(change.new[0]), float(change.new[1])
+                moved = max(abs(new_lat - old_lat), abs(new_lon - old_lon))
+            except Exception:
+                return
+
+            # Browser resize can shift center by tiny floating-point amounts.
+            # Do not clear badges unless the map really moved.
+            if moved < 0.0005:
+                return
+
+            _clear_popups()
 
         def _on_zoom(change):
             if getattr(m, "_suppress_popup_clear", False):
                 return
             if change.new is None or change.old is None:
                 return
-            if change.new != change.old:
-                _clear_popups()
+
+            try:
+                if abs(float(change.new) - float(change.old)) < 0.01:
+                    return
+            except Exception:
+                return
+
+            _clear_popups()
 
         def _on_layers(change):
             if getattr(m, "_suppress_popup_clear", False):
