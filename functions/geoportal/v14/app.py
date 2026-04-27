@@ -1579,19 +1579,18 @@ def Page():
 
     solara.use_effect(_init_ksa_layers, [m])
 
-    def _sync_ksa_layer():
-        if product_switching_ref.current:
-            return
+    def _sync_ksa_layer(product=None):
+        product = product or active_product
 
-        active_layer = ksa_layer_area if active_product == PRODUCT_DATEPALM_FIELDS else ksa_layer_normal
-        inactive_layer = ksa_layer_normal if active_product == PRODUCT_DATEPALM_FIELDS else ksa_layer_area
+        active_layer = ksa_layer_area if product == PRODUCT_DATEPALM_FIELDS else ksa_layer_normal
+        inactive_layer = ksa_layer_normal if product == PRODUCT_DATEPALM_FIELDS else ksa_layer_area
 
         if inactive_layer and inactive_layer in m.layers:
             _remove_layer(inactive_layer)
 
         if active_layer and active_layer not in m.layers:
             _insert_after(active_layer, esri)
-            
+                
     def _bring_layer_to_front(layer):
         if not layer or layer not in m.layers:
             return
@@ -1600,8 +1599,7 @@ def Page():
             m.add_layer(layer)
         except Exception:
             pass
-    solara.use_effect(_sync_ksa_layer, [m, esri, active_product, ksa_layer_normal, ksa_layer_area])
-
+    solara.use_effect(_sync_ksa_layer,[m, esri, active_product, ksa_layer_normal, ksa_layer_area],)
 
     def _cleanup_on_product_change():
         if active_product == PRODUCT_DATEPALM_FIELDS:
@@ -3687,15 +3685,14 @@ def Page():
         product_switching_ref.current = True
 
         _clear_all_product_layers_immediately()
+        _sync_ksa_layer(product)
         _precenter_product(product)
 
         loading_product_ref.current = product
         set_loading_message("Data Loading ...")
 
-        # Do not auto-fit products that should keep fixed default view.
         if product not in {
             PRODUCT_DATEPALM_FIELDS,
-            
             PRODUCT_CENTER_PIVOT,
             PRODUCT_TREE_HEALTH,
         }:
